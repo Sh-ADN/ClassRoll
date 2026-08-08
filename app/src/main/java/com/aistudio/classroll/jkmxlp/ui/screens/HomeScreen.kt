@@ -14,6 +14,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aistudio.classroll.jkmxlp.data.AttendanceRecordEntity
 import com.aistudio.classroll.jkmxlp.data.StudentEntity
 import com.aistudio.classroll.jkmxlp.ui.ClassRollViewModel
+import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -190,44 +191,19 @@ fun HomeScreen(viewModel: ClassRollViewModel) {
         Spacer(Modifier.height(16.dp))
         
         key(currentStudent.roll) {
+            val allAttendanceForYear by viewModel.allAttendanceForYear.collectAsStateWithLifecycle(initialValue = emptyList())
+            val studentRecords = remember(allAttendanceForYear, currentStudent.roll) {
+                allAttendanceForYear.filter { it.roll == currentStudent.roll }
+            }
             SwipeableStudentCard(
                 student = currentStudent,
+                attendanceRecords = studentRecords,
                 onSwiped = { status ->
                     viewModel.updateCell(date, currentStudent.roll, status)
                     currentIndex++
                 },
                 modifier = Modifier.weight(1f)
             )
-        }
-        
-        Spacer(Modifier.height(16.dp))
-
-        // Tap action buttons for Present/Absent
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceEvenly
-        ) {
-            Button(
-                onClick = {
-                    viewModel.updateCell(date, currentStudent.roll, "P")
-                    currentIndex++
-                },
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4CAF50)),
-                modifier = Modifier.weight(1f).height(50.dp).padding(end = 8.dp)
-            ) {
-                Text("Present (Swipe Right)", color = Color.White)
-            }
-
-            Button(
-                onClick = {
-                    viewModel.updateCell(date, currentStudent.roll, "A")
-                    currentIndex++
-                },
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFF44336)),
-                modifier = Modifier.weight(1f).height(50.dp).padding(start = 8.dp)
-            ) {
-                Text("Absent (Swipe Left)", color = Color.White)
-            }
         }
 
         Spacer(Modifier.height(8.dp))
@@ -238,6 +214,7 @@ fun HomeScreen(viewModel: ClassRollViewModel) {
 @Composable
 private fun SwipeableStudentCard(
     student: StudentEntity,
+    attendanceRecords: List<AttendanceRecordEntity>,
     onSwiped: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -246,6 +223,7 @@ private fun SwipeableStudentCard(
             dismissValue != SwipeToDismissBoxValue.Settled
         }
     )
+    val coroutineScope = rememberCoroutineScope()
 
     LaunchedEffect(dismissState.currentValue) {
         when (dismissState.currentValue) {
@@ -255,41 +233,218 @@ private fun SwipeableStudentCard(
         }
     }
 
-    SwipeToDismissBox(
-        state = dismissState,
-        modifier = modifier,
-        backgroundContent = {
-            val color = when (dismissState.targetValue) {
-                SwipeToDismissBoxValue.StartToEnd -> Color(0xFF4CAF50)
-                SwipeToDismissBoxValue.EndToStart -> Color(0xFFF44336)
-                else -> Color.LightGray
+    // --- 1. Attendance Rate Calculation ---
+    val totalSessions = attendanceRecords.size
+    val presentCount = attendanceRecords.count { it.status == "P" }
+    val attendanceRate = if (totalSessions > 0) (presentCount.toFloat() / totalSessions.toFloat()) else 1.0f
+    val ratePercentage = (attendanceRate * 100).toInt()
+
+    val rateColor = when {
+        totalSessions == 0 -> MaterialTheme.colorScheme.primary
+        ratePercentage >= 75 -> Color(0xFF2E7D32)
+        ratePercentage >= 60 -> Color(0xFFF57C00)
+        else -> Color(0xFFC62828)
+    }
+
+    // --- 2. Streak Calculation ---
+    val sortedRecords = remember(attendanceRecords) {
+        attendanceRecords.sortedByDescending { it.date }
+    }
+    val currentStreakStatus = sortedRecords.firstOrNull()?.status
+    val streakCount = if (currentStreakStatus != null) {
+        sortedRecords.takeWhile { it.status == currentStreakStatus }.size
+    } else 0
+
+    val streakBadgeText = when {
+        totalSessions == 0 -> "✨ New Student"
+        currentStreakStatus == "P" -> "🔥 $streakCount Session Present Streak"
+        currentStreakStatus == "A" -> "⚠️ $streakCount Session Absence Streak"
+        else -> "No history"
+    }
+
+    // --- 3. Last Recorded Status ---
+    val lastRecord = sortedRecords.firstOrNull()
+    val lastSessionText = if (lastRecord != null) {
+        val formattedLastDate = formatDisplayDate(lastRecord.date)
+        val statusName = if (lastRecord.status == "P") "Present" else "Absent"
+        "Last Status: $statusName ($formattedLastDate)"
+    } else {
+        "First attendance entry for this student"
+    }
+
+    Column(modifier = modifier) {
+        SwipeToDismissBox(
+            state = dismissState,
+            modifier = Modifier.weight(1f),
+            backgroundContent = {
+                val color = when (dismissState.targetValue) {
+                    SwipeToDismissBoxValue.StartToEnd -> Color(0xFF4CAF50)
+                    SwipeToDismissBoxValue.EndToStart -> Color(0xFFF44336)
+                    else -> Color.LightGray
+                }
+                val alignment = when (dismissState.targetValue) {
+                    SwipeToDismissBoxValue.StartToEnd -> Alignment.CenterStart
+                    SwipeToDismissBoxValue.EndToStart -> Alignment.CenterEnd
+                    else -> Alignment.Center
+                }
+                Box(
+                    Modifier.fillMaxSize().background(color, MaterialTheme.shapes.large).padding(24.dp),
+                    contentAlignment = alignment
+                ) {
+                    Text(
+                        when (dismissState.targetValue) {
+                            SwipeToDismissBoxValue.StartToEnd -> "PRESENT"
+                            SwipeToDismissBoxValue.EndToStart -> "ABSENT"
+                            else -> ""
+                        },
+                        color = Color.White,
+                        style = MaterialTheme.typography.headlineMedium
+                    )
+                }
             }
-            val alignment = when (dismissState.targetValue) {
-                SwipeToDismissBoxValue.StartToEnd -> Alignment.CenterStart
-                SwipeToDismissBoxValue.EndToStart -> Alignment.CenterEnd
-                else -> Alignment.Center
-            }
-            Box(Modifier.fillMaxSize().background(color, MaterialTheme.shapes.large).padding(24.dp), contentAlignment = alignment) {
-                Text(
-                    when (dismissState.targetValue) {
-                        SwipeToDismissBoxValue.StartToEnd -> "PRESENT"
-                        SwipeToDismissBoxValue.EndToStart -> "ABSENT"
-                        else -> ""
-                    },
-                    color = Color.White,
-                    style = MaterialTheme.typography.headlineMedium
+        ) {
+            Card(
+                modifier = Modifier.fillMaxSize(),
+                elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surface
                 )
+            ) {
+                Column(
+                    Modifier
+                        .fillMaxSize()
+                        .padding(20.dp),
+                    verticalArrangement = Arrangement.SpaceBetween,
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    // Top Section: Roll Number Pill Badge & Streak Badge
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Surface(
+                            shape = MaterialTheme.shapes.small,
+                            color = MaterialTheme.colorScheme.primaryContainer,
+                            modifier = Modifier.padding(2.dp)
+                        ) {
+                            Text(
+                                text = "Roll #${student.roll}",
+                                style = MaterialTheme.typography.titleMedium,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                            )
+                        }
+
+                        // Streak Badge (Insight 2)
+                        Surface(
+                            shape = MaterialTheme.shapes.small,
+                            color = if (currentStreakStatus == "A") Color(0xFFFFEBEE) else Color(0xFFE8F5E9)
+                        ) {
+                            Text(
+                                text = streakBadgeText,
+                                style = MaterialTheme.typography.labelMedium,
+                                color = if (currentStreakStatus == "A") Color(0xFFC62828) else Color(0xFF2E7D32),
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                            )
+                        }
+                    }
+
+                    // Center Section: Student Name
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier.padding(vertical = 12.dp)
+                    ) {
+                        Text(
+                            text = student.name,
+                            style = MaterialTheme.typography.headlineLarge,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+
+                    // Bottom Section: Student Stats Box (Insight 1 & Insight 3)
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
+                        ),
+                        shape = MaterialTheme.shapes.medium
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(14.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            // Insight 1: Overall Attendance Rate Progress Bar & Ratio
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "Attendance Rate",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Text(
+                                    text = if (totalSessions > 0) "$ratePercentage% ($presentCount/$totalSessions Days)" else "N/A",
+                                    style = MaterialTheme.typography.titleSmall,
+                                    color = rateColor
+                                )
+                            }
+
+                            LinearProgressIndicator(
+                                progress = { if (totalSessions > 0) attendanceRate else 1f },
+                                modifier = Modifier.fillMaxWidth().height(6.dp),
+                                color = rateColor,
+                                trackColor = rateColor.copy(alpha = 0.2f)
+                            )
+
+                            HorizontalDivider(
+                                modifier = Modifier.padding(vertical = 2.dp),
+                                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+                            )
+
+                            // Insight 3: Last Recorded Status
+                            Text(
+                                text = lastSessionText,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
             }
         }
-    ) {
-        Card(
-            modifier = Modifier.fillMaxSize(),
-            elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
+
+        Spacer(Modifier.height(16.dp))
+
+        // Tap action buttons for Present/Absent
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceEvenly
         ) {
-            Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(student.roll, style = MaterialTheme.typography.displayLarge)
-                Spacer(Modifier.height(24.dp))
-                Text(student.name, style = MaterialTheme.typography.headlineMedium)
+            Button(
+                onClick = {
+                    coroutineScope.launch {
+                        dismissState.dismiss(SwipeToDismissBoxValue.StartToEnd)
+                    }
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4CAF50)),
+                modifier = Modifier.weight(1f).height(50.dp).padding(end = 8.dp)
+            ) {
+                Text("Present (Swipe Right)", color = Color.White)
+            }
+
+            Button(
+                onClick = {
+                    coroutineScope.launch {
+                        dismissState.dismiss(SwipeToDismissBoxValue.EndToStart)
+                    }
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFF44336)),
+                modifier = Modifier.weight(1f).height(50.dp).padding(start = 8.dp)
+            ) {
+                Text("Absent (Swipe Left)", color = Color.White)
             }
         }
     }
