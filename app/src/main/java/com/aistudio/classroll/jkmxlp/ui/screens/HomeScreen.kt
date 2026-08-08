@@ -2,6 +2,7 @@ package com.aistudio.classroll.jkmxlp.ui.screens
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material3.*
@@ -404,12 +405,35 @@ private fun SwipeableStudentCard(
                                 color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
                             )
 
-                            // Insight 3: Last Recorded Status
-                            Text(
-                                text = lastSessionText,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
+                            // Insight 3 & 4: Last Recorded Status & Recent History Dots
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = lastSessionText,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    val recentRecords = sortedRecords.take(5).reversed()
+                                    recentRecords.forEach { record ->
+                                        Box(
+                                            modifier = Modifier
+                                                .size(10.dp)
+                                                .background(
+                                                    color = if (record.status == "P") Color(0xFF4CAF50) else Color(0xFFF44336),
+                                                    shape = CircleShape
+                                                )
+                                        )
+                                    }
+                                }
+                            }
                         }
                     }
                 }
