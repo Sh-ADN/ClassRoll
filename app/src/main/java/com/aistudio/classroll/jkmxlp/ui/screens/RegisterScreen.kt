@@ -5,8 +5,9 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.ArrowForward
@@ -44,6 +45,10 @@ fun RegisterScreen(viewModel: ClassRollViewModel) {
     
     val attendanceRecordsFlow = remember(selectedMonthStr, currentYear) { viewModel.getAttendanceForMonth(selectedMonthStr) }
     val attendanceRecords by attendanceRecordsFlow.collectAsStateWithLifecycle()
+
+    val attendanceMap = remember(attendanceRecords) {
+        attendanceRecords.associateBy { Pair(it.roll, it.date) }
+    }
     
     var searchQuery by remember { mutableStateOf("") }
     var showStudentDialog by remember { mutableStateOf(false) }
@@ -124,12 +129,12 @@ fun RegisterScreen(viewModel: ClassRollViewModel) {
     }
 
     if (showCsvExportDialog) {
-        val csvContent = remember(filteredStudents, dates, attendanceRecords) {
+        val csvContent = remember(filteredStudents, dates, attendanceMap) {
             val header = "Roll,Name," + dates.joinToString(",") { it.substringAfterLast("-") }
             val rows = filteredStudents.map { student ->
-                val attValues = dates.map { date ->
-                    attendanceRecords.find { it.roll == student.roll && it.date == date }?.status ?: ""
-                }.joinToString(",")
+                val attValues = dates.joinToString(",") { date ->
+                    attendanceMap[Pair(student.roll, date)]?.status ?: ""
+                }
                 "${student.roll},\"${student.name}\",$attValues"
             }
             (listOf(header) + rows).joinToString("\n")
@@ -174,7 +179,6 @@ fun RegisterScreen(viewModel: ClassRollViewModel) {
         )
     }
 
-    val verticalScrollState = rememberScrollState()
     val horizontalScrollState = rememberScrollState()
 
     Scaffold(
@@ -236,14 +240,17 @@ fun RegisterScreen(viewModel: ClassRollViewModel) {
                     Text("No matching students found.")
                 }
             } else {
-                Row(Modifier.weight(1f)) {
-                    // Sticky Left Column (Roll / Name)
-                    Column(Modifier.width(130.dp)) {
-                        // Sticky Header Cell
+                Column(Modifier.weight(1f)) {
+                    // Header Row (Sticky Roll/Name Header + Scrollable Dates)
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .height(48.dp)
+                    ) {
                         Box(
                             Modifier
-                                .height(48.dp)
-                                .fillMaxWidth()
+                                .width(130.dp)
+                                .fillMaxHeight()
                                 .background(MaterialTheme.colorScheme.surfaceVariant)
                                 .border(1.dp, Color.Gray),
                             contentAlignment = Alignment.Center
@@ -251,32 +258,13 @@ fun RegisterScreen(viewModel: ClassRollViewModel) {
                             Text("Roll / Name", style = MaterialTheme.typography.labelSmall)
                         }
 
-                        // Scrollable Student Names
-                        Column(Modifier.verticalScroll(verticalScrollState)) {
-                            filteredStudents.forEach { student ->
-                                Box(
-                                    Modifier
-                                        .height(48.dp)
-                                        .fillMaxWidth()
-                                        .border(1.dp, Color.Gray)
-                                        .padding(4.dp)
-                                        .clickable {
-                                            editingStudentRoll = student.roll
-                                            editingStudentName = student.name
-                                            showStudentDialog = true
-                                        },
-                                    contentAlignment = Alignment.CenterStart
-                                ) {
-                                    Text("${student.roll} ${student.name}", maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall)
-                                }
-                            }
-                        }
-                    }
-
-                    // Horizontally Scrollable Grid (Dates & Attendance Cells)
-                    Column(Modifier.fillMaxWidth().horizontalScroll(horizontalScrollState)) {
-                        // Header Row (Dates)
-                        Row(Modifier.height(48.dp).background(MaterialTheme.colorScheme.surfaceVariant)) {
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .fillMaxHeight()
+                                .horizontalScroll(horizontalScrollState)
+                                .background(MaterialTheme.colorScheme.surfaceVariant)
+                        ) {
                             dates.forEach { date ->
                                 val dayStr = date.substringAfterLast("-")
                                 Box(
@@ -290,13 +278,47 @@ fun RegisterScreen(viewModel: ClassRollViewModel) {
                                 }
                             }
                         }
+                    }
 
-                        // Attendance Cells Column (synced vertically with left column)
-                        Column(Modifier.verticalScroll(verticalScrollState)) {
-                            filteredStudents.forEach { student ->
-                                Row(Modifier.height(48.dp)) {
+                    // LazyColumn for Student Rows (Renders only visible rows instantly)
+                    LazyColumn(Modifier.fillMaxWidth().weight(1f)) {
+                        items(filteredStudents, key = { it.roll }) { student ->
+                            Row(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .height(48.dp)
+                            ) {
+                                // Sticky Left Student Roll/Name Cell
+                                Box(
+                                    Modifier
+                                        .width(130.dp)
+                                        .fillMaxHeight()
+                                        .border(1.dp, Color.Gray)
+                                        .padding(4.dp)
+                                        .clickable {
+                                            editingStudentRoll = student.roll
+                                            editingStudentName = student.name
+                                            showStudentDialog = true
+                                        },
+                                    contentAlignment = Alignment.CenterStart
+                                ) {
+                                    Text(
+                                        "${student.roll} ${student.name}",
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        style = MaterialTheme.typography.bodySmall
+                                    )
+                                }
+
+                                // Attendance Cells Row
+                                Row(
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .fillMaxHeight()
+                                        .horizontalScroll(horizontalScrollState)
+                                ) {
                                     dates.forEach { date ->
-                                        val record = attendanceRecords.find { it.roll == student.roll && it.date == date }
+                                        val record = attendanceMap[Pair(student.roll, date)]
                                         val status = record?.status ?: ""
                                         val cellColor = when (status) {
                                             "P" -> Color(0xFFC8E6C9)

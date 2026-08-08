@@ -32,6 +32,9 @@ interface ClassRollDao {
     @Query("UPDATE attendance_records SET isSynced = 1 WHERE year = :year AND date = :date AND roll = :roll")
     suspend fun markSynced(year: String, date: String, roll: String)
 
+    @Query("DELETE FROM attendance_records WHERE year = :year AND date = :date AND roll = :roll")
+    suspend fun deleteAttendanceRecord(year: String, date: String, roll: String)
+
     @Query("DELETE FROM students WHERE year = :year AND roll = :roll")
     suspend fun deleteStudent(year: String, roll: String)
 

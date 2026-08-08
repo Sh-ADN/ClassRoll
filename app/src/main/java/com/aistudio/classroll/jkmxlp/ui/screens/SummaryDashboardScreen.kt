@@ -50,8 +50,9 @@ fun SummaryDashboardScreen(viewModel: ClassRollViewModel) {
 
     // Calculate present, absent counts, and consecutive absences for each student
     val studentStats = remember(students, allAttendance) {
+        val recordsByStudent = allAttendance.groupBy { it.roll }
         students.map { student ->
-            val records = allAttendance.filter { it.roll == student.roll }.sortedBy { it.date }
+            val records = (recordsByStudent[student.roll] ?: emptyList()).sortedBy { it.date }
             val presentCount = records.count { it.status == "P" }
             val absentCount = records.count { it.status == "A" }
             val total = presentCount + absentCount

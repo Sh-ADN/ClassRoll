@@ -116,6 +116,15 @@ class ClassRollViewModel(application: Application) : AndroidViewModel(applicatio
             }
         }
     }
+
+    fun deleteAttendanceRecord(date: String, roll: String) {
+        viewModelScope.launch {
+            val year = currentYear.value
+            if (year.isNotBlank()) {
+                repository.deleteAttendanceRecord(year, date, roll)
+            }
+        }
+    }
     
     fun clearAttendance() {
         viewModelScope.launch {

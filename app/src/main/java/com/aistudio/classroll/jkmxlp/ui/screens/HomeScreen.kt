@@ -25,10 +25,28 @@ fun HomeScreen(viewModel: ClassRollViewModel) {
     val activeStudents = remember(students) { students.filter { it.name.isNotBlank() } }
     val currentYear by viewModel.currentYear.collectAsStateWithLifecycle()
     var currentIndex by remember { mutableStateOf(0) }
-    val records = remember { mutableStateListOf<AttendanceRecordEntity>() }
     var date by remember { mutableStateOf(SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())) }
     var showDatePicker by remember { mutableStateOf(false) }
-    var submissionMessage by remember { mutableStateOf("") }
+
+    val dateRecordsFlow = remember(date, currentYear) { viewModel.getAttendanceForDate(date) }
+    val dateRecords by dateRecordsFlow.collectAsStateWithLifecycle()
+
+    var initializedForDate by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(date, currentYear, activeStudents, dateRecords) {
+        if (initializedForDate != "$date-$currentYear" && activeStudents.isNotEmpty()) {
+            val recordedRolls = dateRecords.map { it.roll }.toSet()
+            val firstUnrecordedIndex = activeStudents.indexOfFirst { it.roll !in recordedRolls }
+            currentIndex = if (firstUnrecordedIndex != -1) {
+                firstUnrecordedIndex
+            } else if (recordedRolls.isNotEmpty()) {
+                activeStudents.size
+            } else {
+                0
+            }
+            initializedForDate = "$date-$currentYear"
+        }
+    }
 
     if (showDatePicker) {
         val datePickerState = rememberDatePickerState(
@@ -45,8 +63,6 @@ fun HomeScreen(viewModel: ClassRollViewModel) {
                     datePickerState.selectedDateMillis?.let {
                         date = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date(it))
                         currentIndex = 0
-                        records.clear()
-                        submissionMessage = ""
                     }
                     showDatePicker = false
                 }) {
@@ -70,36 +86,43 @@ fun HomeScreen(viewModel: ClassRollViewModel) {
         return
     }
 
+    val displayDate = remember(date) { formatDisplayDate(date) }
+
     if (currentIndex >= activeStudents.size) {
-        val presentCount = records.count { it.status == "P" }
-        val absentCount = records.count { it.status == "A" }
-        Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+        val presentCount = dateRecords.count { it.status == "P" }
+        val absentCount = dateRecords.count { it.status == "A" }
+        Column(Modifier.fillMaxSize().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
             Text("Summary", style = MaterialTheme.typography.headlineLarge)
-            Spacer(Modifier.height(16.dp))
-            Text("Present: $presentCount", style = MaterialTheme.typography.bodyLarge)
-            Text("Absent: $absentCount", style = MaterialTheme.typography.bodyLarge)
+            Spacer(Modifier.height(8.dp))
+            Text("Attendance for $displayDate saved automatically!", style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.primary)
+            Spacer(Modifier.height(24.dp))
+            Card(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+            ) {
+                Column(Modifier.padding(24.dp).fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("Present: $presentCount", style = MaterialTheme.typography.titleLarge, color = Color(0xFF2E7D32))
+                    Spacer(Modifier.height(8.dp))
+                    Text("Absent: $absentCount", style = MaterialTheme.typography.titleLarge, color = Color(0xFFC62828))
+                }
+            }
             Spacer(Modifier.height(32.dp))
-            Button(onClick = { 
-                 submissionMessage = "Submitting..."
-                viewModel.submitAttendance(date, records) { success ->
-                    submissionMessage = if (success) "Saved successfully!" else "Failed to save."
+            Row {
+                Button(onClick = { currentIndex = 0 }) {
+                    Text("Review / Take Again")
                 }
-            }) {
-                Text("Submit")
-            }
-            if (currentIndex > 0) {
-                Spacer(Modifier.height(16.dp))
-                OutlinedButton(onClick = {
-                    if (currentIndex > 0) currentIndex--
-                    if (records.isNotEmpty()) records.removeAt(records.size - 1)
-                    submissionMessage = ""
-                }) {
-                    Text("Undo Last")
+                if (currentIndex > 0) {
+                    Spacer(Modifier.width(16.dp))
+                    OutlinedButton(onClick = {
+                        if (currentIndex > 0) {
+                            currentIndex--
+                            val prevStudent = activeStudents[currentIndex]
+                            viewModel.deleteAttendanceRecord(date, prevStudent.roll)
+                        }
+                    }) {
+                        Text("Undo Last")
+                    }
                 }
-            }
-            if (submissionMessage.isNotEmpty()) {
-                Spacer(Modifier.height(16.dp))
-                Text(submissionMessage)
             }
         }
         return
@@ -115,7 +138,6 @@ fun HomeScreen(viewModel: ClassRollViewModel) {
         ) {
             Column {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    val displayDate = remember(date) { formatDisplayDate(date) }
                     Text("Attendance for $displayDate", style = MaterialTheme.typography.titleLarge)
                     IconButton(onClick = { showDatePicker = true }) {
                         Icon(Icons.Default.DateRange, contentDescription = "Select Date")
@@ -125,8 +147,11 @@ fun HomeScreen(viewModel: ClassRollViewModel) {
             }
             if (currentIndex > 0) {
                 TextButton(onClick = {
-                    if (currentIndex > 0) currentIndex--
-                    if (records.isNotEmpty()) records.removeAt(records.size - 1)
+                    if (currentIndex > 0) {
+                        currentIndex--
+                        val prevStudent = activeStudents[currentIndex]
+                        viewModel.deleteAttendanceRecord(date, prevStudent.roll)
+                    }
                 }) {
                     Text("Undo")
                 }
@@ -151,20 +176,16 @@ fun HomeScreen(viewModel: ClassRollViewModel) {
             horizontalArrangement = Arrangement.SpaceEvenly
         ) {
             OutlinedButton(onClick = {
-                records.clear()
-                activeStudents.forEach { s ->
-                    records.add(AttendanceRecordEntity(currentYear, date, s.roll, "P", false))
-                }
+                val allPresent = activeStudents.map { AttendanceRecordEntity(currentYear, date, it.roll, "P", true) }
+                viewModel.submitAttendance(date, allPresent) { }
                 currentIndex = activeStudents.size
             }) {
                 Text("Mark All Present")
             }
             
             OutlinedButton(onClick = {
-                records.clear()
-                activeStudents.forEach { s ->
-                    records.add(AttendanceRecordEntity(currentYear, date, s.roll, "A", false))
-                }
+                val allAbsent = activeStudents.map { AttendanceRecordEntity(currentYear, date, it.roll, "A", true) }
+                viewModel.submitAttendance(date, allAbsent) { }
                 currentIndex = activeStudents.size
             }) {
                 Text("Mark All Absent")
@@ -177,7 +198,7 @@ fun HomeScreen(viewModel: ClassRollViewModel) {
             SwipeableStudentCard(
                 student = currentStudent,
                 onSwiped = { status ->
-                    records.add(AttendanceRecordEntity(currentYear, date, currentStudent.roll, status, false))
+                    viewModel.updateCell(date, currentStudent.roll, status)
                     currentIndex++
                 },
                 modifier = Modifier.weight(1f)
@@ -193,7 +214,7 @@ fun HomeScreen(viewModel: ClassRollViewModel) {
         ) {
             Button(
                 onClick = {
-                    records.add(AttendanceRecordEntity(currentYear, date, currentStudent.roll, "P", false))
+                    viewModel.updateCell(date, currentStudent.roll, "P")
                     currentIndex++
                 },
                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4CAF50)),
@@ -204,7 +225,7 @@ fun HomeScreen(viewModel: ClassRollViewModel) {
 
             Button(
                 onClick = {
-                    records.add(AttendanceRecordEntity(currentYear, date, currentStudent.roll, "A", false))
+                    viewModel.updateCell(date, currentStudent.roll, "A")
                     currentIndex++
                 },
                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFF44336)),

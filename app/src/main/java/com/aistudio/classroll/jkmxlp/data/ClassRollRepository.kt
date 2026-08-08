@@ -67,6 +67,10 @@ class ClassRollRepository(
         dao.deleteStudent(year, roll)
     }
 
+    suspend fun deleteAttendanceRecord(year: String, date: String, roll: String) {
+        dao.deleteAttendanceRecord(year, date, roll)
+    }
+
     // Update single cell (from Register screen)
     suspend fun updateAttendanceCell(year: String, date: String, roll: String, status: String): Boolean {
         // Update locally
