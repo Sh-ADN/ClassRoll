@@ -28,7 +28,9 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 class ClassRollViewModel(application: Application) : AndroidViewModel(application) {
-    private val db = Room.databaseBuilder(application, AppDatabase::class.java, "classroll_db").build()
+    private val db = Room.databaseBuilder(application, AppDatabase::class.java, "classroll_db")
+        .fallbackToDestructiveMigration()
+        .build()
     private val settingsRepo = SettingsRepository(application)
     val repository = ClassRollRepository(db.classRollDao(), NetworkModule.apiService, settingsRepo)
 
@@ -122,6 +124,15 @@ class ClassRollViewModel(application: Application) : AndroidViewModel(applicatio
             val year = currentYear.value
             if (year.isNotBlank()) {
                 repository.deleteAttendanceRecord(year, date, roll)
+            }
+        }
+    }
+
+    fun clearAttendanceForDate(date: String) {
+        viewModelScope.launch {
+            val year = currentYear.value
+            if (year.isNotBlank()) {
+                repository.clearAttendanceForDate(year, date)
             }
         }
     }

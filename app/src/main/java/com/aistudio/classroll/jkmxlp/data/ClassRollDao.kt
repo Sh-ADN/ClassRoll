@@ -38,6 +38,9 @@ interface ClassRollDao {
     @Query("DELETE FROM students WHERE year = :year AND roll = :roll")
     suspend fun deleteStudent(year: String, roll: String)
 
+    @Query("DELETE FROM attendance_records WHERE year = :year AND date = :date")
+    suspend fun clearAttendanceForDate(year: String, date: String)
+
     @Query("DELETE FROM attendance_records WHERE year = :year")
     suspend fun clearAttendanceForYear(year: String)
 

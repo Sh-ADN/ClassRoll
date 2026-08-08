@@ -29,22 +29,20 @@ fun HomeScreen(viewModel: ClassRollViewModel) {
     var showDatePicker by remember { mutableStateOf(false) }
 
     val dateRecordsFlow = remember(date, currentYear) { viewModel.getAttendanceForDate(date) }
-    val dateRecords by dateRecordsFlow.collectAsStateWithLifecycle()
+    val dateRecords by dateRecordsFlow.collectAsStateWithLifecycle(initialValue = emptyList())
 
-    var initializedForDate by remember { mutableStateOf<String?>(null) }
+    val recordedRolls = remember(dateRecords) { dateRecords.map { it.roll }.toSet() }
 
-    LaunchedEffect(date, currentYear, activeStudents, dateRecords) {
-        if (initializedForDate != "$date-$currentYear" && activeStudents.isNotEmpty()) {
-            val recordedRolls = dateRecords.map { it.roll }.toSet()
+    LaunchedEffect(dateRecords, activeStudents, date, currentYear) {
+        if (activeStudents.isNotEmpty()) {
             val firstUnrecordedIndex = activeStudents.indexOfFirst { it.roll !in recordedRolls }
-            currentIndex = if (firstUnrecordedIndex != -1) {
-                firstUnrecordedIndex
+            if (firstUnrecordedIndex != -1) {
+                currentIndex = firstUnrecordedIndex
             } else if (recordedRolls.isNotEmpty()) {
-                activeStudents.size
+                currentIndex = activeStudents.size
             } else {
-                0
+                currentIndex = 0
             }
-            initializedForDate = "$date-$currentYear"
         }
     }
 
@@ -108,20 +106,17 @@ fun HomeScreen(viewModel: ClassRollViewModel) {
             }
             Spacer(Modifier.height(32.dp))
             Row {
-                Button(onClick = { currentIndex = 0 }) {
-                    Text("Review / Take Again")
+                Button(onClick = { viewModel.clearAttendanceForDate(date) }) {
+                    Text("Clear & Retake Today")
                 }
-                if (currentIndex > 0) {
-                    Spacer(Modifier.width(16.dp))
-                    OutlinedButton(onClick = {
-                        if (currentIndex > 0) {
-                            currentIndex--
-                            val prevStudent = activeStudents[currentIndex]
-                            viewModel.deleteAttendanceRecord(date, prevStudent.roll)
-                        }
-                    }) {
-                        Text("Undo Last")
+                Spacer(Modifier.width(16.dp))
+                OutlinedButton(onClick = {
+                    val lastStudent = activeStudents.lastOrNull()
+                    if (lastStudent != null) {
+                        viewModel.deleteAttendanceRecord(date, lastStudent.roll)
                     }
+                }) {
+                    Text("Undo Last")
                 }
             }
         }

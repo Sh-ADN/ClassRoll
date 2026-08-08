@@ -78,6 +78,10 @@ class ClassRollRepository(
         return true
     }
     
+    suspend fun clearAttendanceForDate(year: String, date: String) {
+        dao.clearAttendanceForDate(year, date)
+    }
+
     suspend fun clearAttendanceForYear(year: String) {
         dao.clearAttendanceForYear(year)
     }
