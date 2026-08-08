@@ -1,0 +1,6 @@
+{
+  "name": "সমাগত খেরোখাতা",
+  "description": "A teacher's app for daily class attendance",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
