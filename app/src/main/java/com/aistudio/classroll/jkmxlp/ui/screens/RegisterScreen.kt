@@ -46,8 +46,12 @@ fun RegisterScreen(viewModel: ClassRollViewModel) {
     val attendanceRecordsFlow = remember(selectedMonthStr, currentYear) { viewModel.getAttendanceForMonth(selectedMonthStr) }
     val attendanceRecords by attendanceRecordsFlow.collectAsStateWithLifecycle()
 
+    // FIX: was keyed by Pair(roll, date), which allocates a new Pair object
+    // for every one of the ~30 date cells in every visible row, every time
+    // the grid recomposes. Nesting by roll first means each row does one
+    // map lookup instead of one Pair allocation per cell.
     val attendanceMap = remember(attendanceRecords) {
-        attendanceRecords.associateBy { Pair(it.roll, it.date) }
+        attendanceRecords.groupBy { it.roll }.mapValues { (_, records) -> records.associateBy { it.date } }
     }
     
     var searchQuery by remember { mutableStateOf("") }
@@ -133,7 +137,7 @@ fun RegisterScreen(viewModel: ClassRollViewModel) {
             val header = "Roll,Name," + dates.joinToString(",") { it.substringAfterLast("-") }
             val rows = filteredStudents.map { student ->
                 val attValues = dates.joinToString(",") { date ->
-                    attendanceMap[Pair(student.roll, date)]?.status ?: ""
+                    attendanceMap[student.roll]?.get(date)?.status ?: ""
                 }
                 "${student.roll},\"${student.name}\",$attValues"
             }
@@ -318,7 +322,7 @@ fun RegisterScreen(viewModel: ClassRollViewModel) {
                                         .horizontalScroll(horizontalScrollState)
                                 ) {
                                     dates.forEach { date ->
-                                        val record = attendanceMap[Pair(student.roll, date)]
+                                        val record = attendanceMap[student.roll]?.get(date)
                                         val status = record?.status ?: ""
                                         val cellColor = when (status) {
                                             "P" -> Color(0xFFC8E6C9)

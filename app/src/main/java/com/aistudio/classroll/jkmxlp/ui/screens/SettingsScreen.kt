@@ -1,5 +1,7 @@
 package com.aistudio.classroll.jkmxlp.ui.screens
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -8,10 +10,14 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aistudio.classroll.jkmxlp.ui.ClassRollViewModel
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 @Composable
 fun SettingsScreen(viewModel: ClassRollViewModel) {
@@ -29,7 +35,16 @@ fun SettingsScreen(viewModel: ClassRollViewModel) {
     var backupCopyMsg by remember { mutableStateOf("") }
 
     val clipboardManager = LocalClipboardManager.current
-    val presetYears = listOf("2024", "2025", "2026", "2027")
+    val context = LocalContext.current
+
+    // FIX: was a hardcoded list that would need a manual code edit every
+    // few years. Now derived from years that actually have data, loaded
+    // once when this screen appears.
+    val presetYears by viewModel.availableYears.collectAsStateWithLifecycle()
+    LaunchedEffect(Unit) {
+        viewModel.loadAvailableYears()
+    }
+
     val themeOptions = listOf(
         "SYSTEM" to "System",
         "LIGHT" to "Light",
@@ -37,6 +52,46 @@ fun SettingsScreen(viewModel: ClassRollViewModel) {
         "FOREST" to "Forest Green",
         "OCEAN" to "Deep Ocean"
     )
+
+    // NEW: proper file-based backup via the system file picker (Storage
+    // Access Framework), instead of only a clipboard blob that gets
+    // unwieldy once you've got months of records.
+    var pendingExportJson by remember { mutableStateOf("") }
+
+    val saveFileLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/json")
+    ) { uri ->
+        if (uri != null && pendingExportJson.isNotBlank()) {
+            try {
+                context.contentResolver.openOutputStream(uri)?.use { out ->
+                    out.write(pendingExportJson.toByteArray())
+                }
+                statusMessage = "Backup saved to file."
+            } catch (e: Exception) {
+                statusMessage = "Failed to save backup file: ${e.message}"
+            }
+        }
+    }
+
+    val openFileLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) {
+            try {
+                val json = context.contentResolver.openInputStream(uri)
+                    ?.bufferedReader()?.use { it.readText() } ?: ""
+                if (json.isNotBlank()) {
+                    viewModel.restoreBackupJson(json) { success, msg ->
+                        statusMessage = msg
+                    }
+                } else {
+                    statusMessage = "Selected file was empty."
+                }
+            } catch (e: Exception) {
+                statusMessage = "Failed to read backup file: ${e.message}"
+            }
+        }
+    }
 
     if (showExportBackupDialog) {
         AlertDialog(
@@ -265,6 +320,12 @@ fun SettingsScreen(viewModel: ClassRollViewModel) {
 
         // Offline Backup & Restore Section
         Text("Offline Backup & Restore", style = MaterialTheme.typography.titleLarge)
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+            "Save to a file regularly \u2014 this is your only copy of the data.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
         Spacer(modifier = Modifier.height(12.dp))
 
         Row(
@@ -274,20 +335,47 @@ fun SettingsScreen(viewModel: ClassRollViewModel) {
             Button(
                 onClick = {
                     viewModel.exportBackupJson { json ->
+                        pendingExportJson = json
+                        val stamp = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
+                        saveFileLauncher.launch("classroll_backup_$stamp.json")
+                    }
+                },
+                modifier = Modifier.weight(1f)
+            ) {
+                Text("Save Backup to File")
+            }
+
+            OutlinedButton(
+                onClick = { openFileLauncher.launch(arrayOf("application/json", "text/*")) },
+                modifier = Modifier.weight(1f)
+            ) {
+                Text("Load Backup from File")
+            }
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            TextButton(
+                onClick = {
+                    viewModel.exportBackupJson { json ->
                         backupJsonText = json
                         showExportBackupDialog = true
                     }
                 },
                 modifier = Modifier.weight(1f)
             ) {
-                Text("Export Backup")
+                Text("Copy as Text Instead")
             }
 
-            OutlinedButton(
+            TextButton(
                 onClick = { showRestoreBackupDialog = true },
                 modifier = Modifier.weight(1f)
             ) {
-                Text("Restore Backup")
+                Text("Paste as Text Instead")
             }
         }
 

@@ -29,6 +29,10 @@ fun HomeScreen(viewModel: ClassRollViewModel) {
     var currentIndex by remember { mutableStateOf(0) }
     var date by remember { mutableStateOf(SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())) }
     var showDatePicker by remember { mutableStateOf(false) }
+    // FIX: tracks rolls in the order they were actually marked today, so
+    // "Undo" always undoes the real last action instead of assuming it's
+    // whichever student sits last in roster order.
+    val swipedRolls = remember(date, currentYear) { mutableStateListOf<String>() }
 
     val dateRecordsFlow = remember(date, currentYear) { viewModel.getAttendanceForDate(date) }
     val dateRecords by dateRecordsFlow.collectAsStateWithLifecycle(initialValue = emptyList())
@@ -108,16 +112,22 @@ fun HomeScreen(viewModel: ClassRollViewModel) {
             }
             Spacer(Modifier.height(32.dp))
             Row {
-                Button(onClick = { viewModel.clearAttendanceForDate(date) }) {
+                Button(onClick = {
+                    viewModel.clearAttendanceForDate(date)
+                    swipedRolls.clear()
+                }) {
                     Text("Clear & Retake Today")
                 }
                 Spacer(Modifier.width(16.dp))
-                OutlinedButton(onClick = {
-                    val lastStudent = activeStudents.lastOrNull()
-                    if (lastStudent != null) {
-                        viewModel.deleteAttendanceRecord(date, lastStudent.roll)
-                    }
-                }) {
+                OutlinedButton(
+                    onClick = {
+                        val lastRoll = swipedRolls.removeLastOrNull()
+                        if (lastRoll != null) {
+                            viewModel.deleteAttendanceRecord(date, lastRoll)
+                        }
+                    },
+                    enabled = swipedRolls.isNotEmpty()
+                ) {
                     Text("Undo Last")
                 }
             }
@@ -142,12 +152,13 @@ fun HomeScreen(viewModel: ClassRollViewModel) {
                 }
                 Text("${currentIndex + 1} / ${activeStudents.size}", style = MaterialTheme.typography.bodyLarge)
             }
-            if (currentIndex > 0) {
+            if (currentIndex > 0 && swipedRolls.isNotEmpty()) {
                 TextButton(onClick = {
-                    if (currentIndex > 0) {
-                        currentIndex--
-                        val prevStudent = activeStudents[currentIndex]
-                        viewModel.deleteAttendanceRecord(date, prevStudent.roll)
+                    val lastRoll = swipedRolls.removeLastOrNull()
+                    if (lastRoll != null) {
+                        viewModel.deleteAttendanceRecord(date, lastRoll)
+                        val rollIndex = activeStudents.indexOfFirst { it.roll == lastRoll }
+                        currentIndex = if (rollIndex >= 0) rollIndex else (currentIndex - 1).coerceAtLeast(0)
                     }
                 }) {
                     Text("Undo")
@@ -175,6 +186,8 @@ fun HomeScreen(viewModel: ClassRollViewModel) {
             OutlinedButton(onClick = {
                 val allPresent = activeStudents.map { AttendanceRecordEntity(currentYear, date, it.roll, "P", true) }
                 viewModel.submitAttendance(date, allPresent) { }
+                swipedRolls.clear()
+                swipedRolls.addAll(activeStudents.map { it.roll })
                 currentIndex = activeStudents.size
             }) {
                 Text("Mark All Present")
@@ -183,6 +196,8 @@ fun HomeScreen(viewModel: ClassRollViewModel) {
             OutlinedButton(onClick = {
                 val allAbsent = activeStudents.map { AttendanceRecordEntity(currentYear, date, it.roll, "A", true) }
                 viewModel.submitAttendance(date, allAbsent) { }
+                swipedRolls.clear()
+                swipedRolls.addAll(activeStudents.map { it.roll })
                 currentIndex = activeStudents.size
             }) {
                 Text("Mark All Absent")
@@ -201,6 +216,7 @@ fun HomeScreen(viewModel: ClassRollViewModel) {
                 attendanceRecords = studentRecords,
                 onSwiped = { status ->
                     viewModel.updateCell(date, currentStudent.roll, status)
+                    swipedRolls.add(currentStudent.roll)
                     currentIndex++
                 },
                 modifier = Modifier.weight(1f)

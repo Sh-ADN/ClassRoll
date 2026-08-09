@@ -56,6 +56,20 @@ class ClassRollViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
+    // NEW: builds the year picker's options from years that actually exist
+    // locally (plus the current calendar year, so a fresh install still has
+    // something to pick), instead of a hardcoded list that goes stale.
+    fun loadAvailableYears() {
+        viewModelScope.launch {
+            val allStudents = repository.getAllStudentsAllYears()
+            val calendarYear = SimpleDateFormat("yyyy", Locale.US).format(Date())
+            val years = (allStudents.map { it.year }.filter { it.isNotBlank() } + calendarYear)
+                .distinct()
+                .sorted()
+            _availableYears.value = years
+        }
+    }
+
     fun fetchYears() {
         viewModelScope.launch {
             _isSyncing.value = true

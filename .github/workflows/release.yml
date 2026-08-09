@@ -29,11 +29,20 @@ jobs:
         with:
           gradle-version: 9.3.1
 
-      - name: Generate debug keystore
-        run: keytool -genkey -v -keystore debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
+      - name: Build release APK (unsigned)
+        run: gradle assembleRelease --stacktrace
 
-      - name: Build debug APK
-        run: gradle assembleDebug --stacktrace
+      - name: Sign release APK
+        id: sign_apk
+        uses: r0adkll/sign-android-release@v1
+        with:
+          releaseDirectory: app/build/outputs/apk/release
+          signingKeyBase64: ${{ secrets.KEYSTORE_BASE64 }}
+          alias: ${{ secrets.KEY_ALIAS }}
+          keyStorePassword: ${{ secrets.KEYSTORE_PASSWORD }}
+          keyPassword: ${{ secrets.KEY_PASSWORD }}
+        env:
+          BUILD_TOOLS_VERSION: "34.0.0"
 
       - name: Set build tag
         id: vars
@@ -45,37 +54,6 @@ jobs:
           tag_name: ${{ steps.vars.outputs.tag }}
           name: "সমাগত খেরোখাতা – build ${{ github.run_number }}"
           make_latest: true
-          # If your AI Studio project's module isn't named "app",
-          # update this path to match (check settings.gradle).
-          files: app/build/outputs/apk/debug/app-debug.apk
+          files: ${{ steps.sign_apk.outputs.signedReleaseFile }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-# ---------------------------------------------------------------
-# UPGRADING TO A SIGNED RELEASE BUILD (optional, do this later)
-# ---------------------------------------------------------------
-# 1. Generate a keystore once, locally:
-#      keytool -genkeypair -v -keystore release-key.jks -alias attendance \
-#        -keyalg RSA -keysize 2048 -validity 10000
-# 2. Base64-encode it and save as a GitHub secret named KEYSTORE_BASE64:
-#      base64 -w0 release-key.jks   (Linux/Mac)
-#      certutil -encode release-key.jks tmp.b64   (Windows)
-# 3. Add three more secrets: KEYSTORE_PASSWORD, KEY_ALIAS, KEY_PASSWORD
-# 4. Replace the "Build debug APK" step with:
-#
-#      - name: Build release APK (unsigned)
-#        run: ./gradlew assembleRelease --stacktrace
-#
-#      - name: Sign APK
-#        id: sign_apk
-#        uses: r0adkll/sign-android-release@v1
-#        with:
-#          releaseDirectory: app/build/outputs/apk/release
-#          signingKeyBase64: ${{ secrets.KEYSTORE_BASE64 }}
-#          alias: ${{ secrets.KEY_ALIAS }}
-#          keyStorePassword: ${{ secrets.KEYSTORE_PASSWORD }}
-#          keyPassword: ${{ secrets.KEY_PASSWORD }}
-#
-#    ...and change the release "files:" line to:
-#          files: ${{ steps.sign_apk.outputs.signedReleaseFile }}
-# ---------------------------------------------------------------

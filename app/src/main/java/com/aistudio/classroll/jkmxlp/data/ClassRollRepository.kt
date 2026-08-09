@@ -15,7 +15,7 @@ class ClassRollRepository(
     fun getAttendanceForDate(year: String, date: String): Flow<List<AttendanceRecordEntity>> {
         return dao.getAttendanceForDate(year, date)
     }
-    
+
     fun getAttendanceForMonth(year: String, month: String): Flow<List<AttendanceRecordEntity>> {
         return dao.getAttendanceForMonth(year, month)
     }
@@ -29,19 +29,14 @@ class ClassRollRepository(
         // Feature disabled - local only
     }
 
+    // FIX: removed the loop that used to fill in a placeholder student for
+    // every number between 1 and the highest roll in the CSV. If a roll
+    // number was large or not part of a clean 1..N sequence, that loop
+    // could try to generate a huge number of blank rows and freeze this
+    // screen. Now it just imports exactly what's in the CSV.
     suspend fun importStudents(year: String, students: List<RemoteStudent>): String {
         return try {
-            val maxRoll = students.maxOfOrNull { it.roll.toIntOrNull() ?: 0 } ?: 0
-            val importedRolls = students.mapNotNull { it.roll.toIntOrNull() }.toSet()
-            
-            val allStudents = students.toMutableList()
-            for (i in 1..maxRoll) {
-                if (i !in importedRolls) {
-                    allStudents.add(RemoteStudent(roll = i.toString(), name = "", active = true))
-                }
-            }
-
-            val entities = allStudents.map {
+            val entities = students.map {
                 StudentEntity(year = year, roll = it.roll, name = it.name, active = it.active)
             }
             dao.insertStudents(entities)
@@ -54,7 +49,7 @@ class ClassRollRepository(
 
     // Submit a single day's attendance
     suspend fun submitAttendance(year: String, date: String, records: List<AttendanceRecordEntity>): Boolean {
-        // Save locally 
+        // Save locally
         dao.insertAttendanceRecords(records)
         return true
     }
@@ -77,7 +72,7 @@ class ClassRollRepository(
         dao.insertAttendanceRecords(listOf(AttendanceRecordEntity(year, date, roll, status, isSynced = true)))
         return true
     }
-    
+
     suspend fun clearAttendanceForDate(year: String, date: String) {
         dao.clearAttendanceForDate(year, date)
     }
