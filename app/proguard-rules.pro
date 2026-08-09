@@ -29,6 +29,9 @@
 -keep class * extends androidx.room.RoomDatabase
 -dontwarn androidx.room.paging.**
 
+# Keep data layer models to prevent Moshi and Room crashes
+-keep class com.aistudio.classroll.jkmxlp.data.** { *; }
+
 # OkHttp & Retrofit optimizations
 -dontwarn okhttp3.internal.**
 -dontwarn retrofit2.Platform**
