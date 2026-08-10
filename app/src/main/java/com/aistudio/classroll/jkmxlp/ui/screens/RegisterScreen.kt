@@ -1,5 +1,7 @@
 package com.aistudio.classroll.jkmxlp.ui.screens
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -19,6 +21,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -62,6 +65,23 @@ fun RegisterScreen(viewModel: ClassRollViewModel) {
     var showCsvExportDialog by remember { mutableStateOf(false) }
     val clipboardManager = LocalClipboardManager.current
     var copyMessage by remember { mutableStateOf("") }
+    // NEW: file-based CSV export, same pattern as the JSON backup in Settings.
+    val context = LocalContext.current
+    var pendingCsvContent by remember { mutableStateOf("") }
+    val saveCsvLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("text/csv")
+    ) { uri ->
+        if (uri != null && pendingCsvContent.isNotBlank()) {
+            try {
+                context.contentResolver.openOutputStream(uri)?.use { out ->
+                    out.write(pendingCsvContent.toByteArray())
+                }
+                copyMessage = "Saved to file."
+            } catch (e: Exception) {
+                copyMessage = "Failed to save: ${e.message}"
+            }
+        }
+    }
 
     val filteredStudents = remember(students, searchQuery) {
         if (searchQuery.isBlank()) students
@@ -165,11 +185,19 @@ fun RegisterScreen(viewModel: ClassRollViewModel) {
                 }
             },
             confirmButton = {
-                Button(onClick = {
-                    clipboardManager.setText(AnnotatedString(csvContent))
-                    copyMessage = "Copied CSV to Clipboard!"
-                }) {
-                    Text("Copy CSV")
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(onClick = {
+                        pendingCsvContent = csvContent
+                        saveCsvLauncher.launch("register_${selectedMonthStr}.csv")
+                    }) {
+                        Text("Save to File")
+                    }
+                    TextButton(onClick = {
+                        clipboardManager.setText(AnnotatedString(csvContent))
+                        copyMessage = "Copied CSV to Clipboard!"
+                    }) {
+                        Text("Copy Instead")
+                    }
                 }
             },
             dismissButton = {

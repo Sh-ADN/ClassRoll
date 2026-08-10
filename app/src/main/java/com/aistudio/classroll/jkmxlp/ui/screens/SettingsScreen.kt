@@ -7,6 +7,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
@@ -14,10 +15,12 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import android.os.Build
 import com.aistudio.classroll.jkmxlp.ui.ClassRollViewModel
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.concurrent.TimeUnit
 
 @Composable
 fun SettingsScreen(viewModel: ClassRollViewModel) {
@@ -45,6 +48,21 @@ fun SettingsScreen(viewModel: ClassRollViewModel) {
         viewModel.loadAvailableYears()
     }
 
+    // NEW: backup reminder + daily attendance reminder state.
+    val lastBackupTimestamp by viewModel.lastBackupTimestamp.collectAsStateWithLifecycle()
+    val reminderEnabled by viewModel.reminderEnabled.collectAsStateWithLifecycle()
+    val reminderTime by viewModel.reminderTime.collectAsStateWithLifecycle()
+
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) {
+            viewModel.setReminderEnabled(true)
+        } else {
+            statusMessage = "Reminder needs notification permission to work. Not enabled."
+        }
+    }
+
     val themeOptions = listOf(
         "SYSTEM" to "System",
         "LIGHT" to "Light",
@@ -67,6 +85,7 @@ fun SettingsScreen(viewModel: ClassRollViewModel) {
                     out.write(pendingExportJson.toByteArray())
                 }
                 statusMessage = "Backup saved to file."
+                viewModel.markBackupDone()
             } catch (e: Exception) {
                 statusMessage = "Failed to save backup file: ${e.message}"
             }
@@ -264,7 +283,7 @@ fun SettingsScreen(viewModel: ClassRollViewModel) {
         }
 
         Spacer(modifier = Modifier.height(24.dp))
-        Divider()
+        HorizontalDivider()
         Spacer(modifier = Modifier.height(16.dp))
 
         // Academic Year Config Section
@@ -315,7 +334,7 @@ fun SettingsScreen(viewModel: ClassRollViewModel) {
         }
 
         Spacer(modifier = Modifier.height(24.dp))
-        Divider()
+        HorizontalDivider()
         Spacer(modifier = Modifier.height(16.dp))
 
         // Offline Backup & Restore Section
@@ -327,6 +346,32 @@ fun SettingsScreen(viewModel: ClassRollViewModel) {
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
         Spacer(modifier = Modifier.height(12.dp))
+
+        // NEW: nudges you if it's been a while since your last backup,
+        // since local storage is now the only copy of this year's data.
+        val daysSinceBackup = if (lastBackupTimestamp == 0L) {
+            -1
+        } else {
+            ((System.currentTimeMillis() - lastBackupTimestamp) / (1000 * 60 * 60 * 24)).toInt()
+        }
+        if (daysSinceBackup == -1 || daysSinceBackup >= 14) {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(
+                    text = if (daysSinceBackup == -1) {
+                        "No backup has been saved yet. Save one below to protect this year's data."
+                    } else {
+                        "Last backup was $daysSinceBackup days ago. Consider saving a new one."
+                    },
+                    modifier = Modifier.padding(12.dp),
+                    color = MaterialTheme.colorScheme.onErrorContainer,
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            }
+            Spacer(modifier = Modifier.height(12.dp))
+        }
 
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -380,7 +425,63 @@ fun SettingsScreen(viewModel: ClassRollViewModel) {
         }
 
         Spacer(modifier = Modifier.height(24.dp))
-        Divider()
+        HorizontalDivider()
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // NEW: Daily Reminder Section
+        Text("Daily Reminder", style = MaterialTheme.typography.titleLarge)
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+            "Get a notification if attendance hasn't been taken yet by this time.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(modifier = Modifier.height(12.dp))
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("Enabled")
+            Switch(
+                checked = reminderEnabled,
+                onCheckedChange = { turnOn ->
+                    if (turnOn) {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                            notificationPermissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+                        } else {
+                            viewModel.setReminderEnabled(true)
+                        }
+                    } else {
+                        viewModel.setReminderEnabled(false)
+                    }
+                }
+            )
+        }
+
+        if (reminderEnabled) {
+            Spacer(modifier = Modifier.height(8.dp))
+            val timeOptions = listOf("07:00", "08:00", "09:00", "10:00", "12:00")
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                timeOptions.forEach { t ->
+                    val label = SimpleDateFormat("h:mm a", Locale.US).format(
+                        SimpleDateFormat("HH:mm", Locale.US).parse(t) ?: Date()
+                    )
+                    FilterChip(
+                        selected = reminderTime == t,
+                        onClick = { viewModel.setReminderTime(t) },
+                        label = { Text(label) }
+                    )
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
+        HorizontalDivider()
         Spacer(modifier = Modifier.height(16.dp))
 
         // Danger Zone Section

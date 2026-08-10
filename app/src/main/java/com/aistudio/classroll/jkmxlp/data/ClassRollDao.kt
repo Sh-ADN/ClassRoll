@@ -17,6 +17,10 @@ interface ClassRollDao {
     @Query("SELECT * FROM attendance_records WHERE year = :year AND date = :date")
     fun getAttendanceForDate(year: String, date: String): Flow<List<AttendanceRecordEntity>>
 
+    // NEW: one-shot count used by the reminder worker (doesn't need a live Flow)
+    @Query("SELECT COUNT(*) FROM attendance_records WHERE year = :year AND date = :date")
+    suspend fun countAttendanceForDate(year: String, date: String): Int
+
     @Query("SELECT * FROM attendance_records WHERE year = :year AND date LIKE :monthPrefix || '%'")
     fun getAttendanceForMonth(year: String, monthPrefix: String): Flow<List<AttendanceRecordEntity>>
 

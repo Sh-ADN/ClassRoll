@@ -3,7 +3,9 @@ package com.aistudio.classroll.jkmxlp.data
 import android.content.Context
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
@@ -17,6 +19,10 @@ class SettingsRepository(private val context: Context) {
         val ACADEMIC_YEAR = stringPreferencesKey("academic_year")
         val APPS_SCRIPT_TOKEN = stringPreferencesKey("apps_script_token")
         val APP_THEME = stringPreferencesKey("app_theme")
+        // NEW
+        val LAST_BACKUP_TIMESTAMP = longPreferencesKey("last_backup_timestamp")
+        val REMINDER_ENABLED = booleanPreferencesKey("reminder_enabled")
+        val REMINDER_TIME = stringPreferencesKey("reminder_time") // "HH:mm", 24h
     }
 
     val appThemeFlow: Flow<String> = context.dataStore.data.map { preferences ->
@@ -33,6 +39,21 @@ class SettingsRepository(private val context: Context) {
 
     val appsScriptTokenFlow: Flow<String> = context.dataStore.data.map {
         "Q8tZ2nLm5vX9aH1kPc4RrW7yNd3Fs6UbJe0MgKt8Vx2ApCn9YqLh5Di7SwBuE4oNz"
+    }
+
+    // NEW: when the last successful backup happened (epoch millis, 0 = never)
+    val lastBackupTimestampFlow: Flow<Long> = context.dataStore.data.map { preferences ->
+        preferences[LAST_BACKUP_TIMESTAMP] ?: 0L
+    }
+
+    // NEW: whether the daily "take attendance" reminder is turned on
+    val reminderEnabledFlow: Flow<Boolean> = context.dataStore.data.map { preferences ->
+        preferences[REMINDER_ENABLED] ?: false
+    }
+
+    // NEW: what time of day the reminder should fire
+    val reminderTimeFlow: Flow<String> = context.dataStore.data.map { preferences ->
+        preferences[REMINDER_TIME] ?: "10:00"
     }
 
     suspend fun updateWebAppUrl(url: String) {
@@ -56,6 +77,25 @@ class SettingsRepository(private val context: Context) {
     suspend fun updateAppTheme(theme: String) {
         context.dataStore.edit { preferences ->
             preferences[APP_THEME] = theme
+        }
+    }
+
+    // NEW
+    suspend fun updateLastBackupTimestamp(timestamp: Long) {
+        context.dataStore.edit { preferences ->
+            preferences[LAST_BACKUP_TIMESTAMP] = timestamp
+        }
+    }
+
+    suspend fun updateReminderEnabled(enabled: Boolean) {
+        context.dataStore.edit { preferences ->
+            preferences[REMINDER_ENABLED] = enabled
+        }
+    }
+
+    suspend fun updateReminderTime(time: String) {
+        context.dataStore.edit { preferences ->
+            preferences[REMINDER_TIME] = time
         }
     }
 }

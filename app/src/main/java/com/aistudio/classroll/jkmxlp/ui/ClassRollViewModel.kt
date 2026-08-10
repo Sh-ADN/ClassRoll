@@ -37,12 +37,49 @@ class ClassRollViewModel(application: Application) : AndroidViewModel(applicatio
     val webAppUrl = settingsRepo.webAppUrlFlow.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "https://script.google.com/macros/s/AKfycbzTDiNJh4LEaIah19SVFaf6JlESbW5tf2ElwaMULTDENIAlXFOFI4QAXEmV1nYwrVdA/exec")
     val currentYear = settingsRepo.academicYearFlow.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "")
     val appTheme = settingsRepo.appThemeFlow.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "SYSTEM")
+    // NEW
+    val lastBackupTimestamp = settingsRepo.lastBackupTimestampFlow.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0L)
+    val reminderEnabled = settingsRepo.reminderEnabledFlow.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+    val reminderTime = settingsRepo.reminderTimeFlow.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "10:00")
 
     private val _availableYears = MutableStateFlow<List<String>>(emptyList())
     val availableYears: StateFlow<List<String>> = _availableYears.asStateFlow()
 
     private val _isSyncing = MutableStateFlow(false)
     val isSyncing = _isSyncing.asStateFlow()
+
+    // NEW: call after a successful "Save Backup to File" so the reminder
+    // banner in Settings knows when the last backup actually happened.
+    fun markBackupDone() {
+        viewModelScope.launch {
+            settingsRepo.updateLastBackupTimestamp(System.currentTimeMillis())
+        }
+    }
+
+    // NEW: turns the daily "take attendance" reminder on/off and
+    // (re)schedules the underlying WorkManager job to match.
+    fun setReminderEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            settingsRepo.updateReminderEnabled(enabled)
+            if (enabled) {
+                com.aistudio.classroll.jkmxlp.reminder.AttendanceReminderWorker.scheduleNext(
+                    getApplication(), reminderTime.value
+                )
+            } else {
+                com.aistudio.classroll.jkmxlp.reminder.AttendanceReminderWorker.cancel(getApplication())
+            }
+        }
+    }
+
+    // NEW: called when the user picks a different reminder time.
+    fun setReminderTime(time: String) {
+        viewModelScope.launch {
+            settingsRepo.updateReminderTime(time)
+            if (reminderEnabled.value) {
+                com.aistudio.classroll.jkmxlp.reminder.AttendanceReminderWorker.scheduleNext(getApplication(), time)
+            }
+        }
+    }
 
     fun updateSettings(year: String) {
         viewModelScope.launch {
