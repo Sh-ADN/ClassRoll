@@ -41,6 +41,13 @@ class ClassRollViewModel(application: Application) : AndroidViewModel(applicatio
     val lastBackupTimestamp = settingsRepo.lastBackupTimestampFlow.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0L)
     val reminderEnabled = settingsRepo.reminderEnabledFlow.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
     val reminderTime = settingsRepo.reminderTimeFlow.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "10:00")
+    val holidays: StateFlow<Set<String>> = settingsRepo.holidaysFlow.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptySet())
+
+    fun toggleHoliday(date: String) {
+        viewModelScope.launch {
+            settingsRepo.toggleHoliday(date)
+        }
+    }
 
     private val _availableYears = MutableStateFlow<List<String>>(emptyList())
     val availableYears: StateFlow<List<String>> = _availableYears.asStateFlow()

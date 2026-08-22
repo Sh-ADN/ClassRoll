@@ -7,6 +7,7 @@ import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
+import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -23,6 +24,7 @@ class SettingsRepository(private val context: Context) {
         val LAST_BACKUP_TIMESTAMP = longPreferencesKey("last_backup_timestamp")
         val REMINDER_ENABLED = booleanPreferencesKey("reminder_enabled")
         val REMINDER_TIME = stringPreferencesKey("reminder_time") // "HH:mm", 24h
+        val CUSTOM_HOLIDAYS = stringSetPreferencesKey("custom_holidays")
     }
 
     val appThemeFlow: Flow<String> = context.dataStore.data.map { preferences ->
@@ -54,6 +56,11 @@ class SettingsRepository(private val context: Context) {
     // NEW: what time of day the reminder should fire
     val reminderTimeFlow: Flow<String> = context.dataStore.data.map { preferences ->
         preferences[REMINDER_TIME] ?: "10:00"
+    }
+
+    // NEW: set of custom holiday date strings ("yyyy-MM-dd")
+    val holidaysFlow: Flow<Set<String>> = context.dataStore.data.map { preferences ->
+        preferences[CUSTOM_HOLIDAYS] ?: emptySet()
     }
 
     suspend fun updateWebAppUrl(url: String) {
@@ -96,6 +103,17 @@ class SettingsRepository(private val context: Context) {
     suspend fun updateReminderTime(time: String) {
         context.dataStore.edit { preferences ->
             preferences[REMINDER_TIME] = time
+        }
+    }
+
+    suspend fun toggleHoliday(date: String) {
+        context.dataStore.edit { preferences ->
+            val current = preferences[CUSTOM_HOLIDAYS] ?: emptySet()
+            if (current.contains(date)) {
+                preferences[CUSTOM_HOLIDAYS] = current - date
+            } else {
+                preferences[CUSTOM_HOLIDAYS] = current + date
+            }
         }
     }
 }
