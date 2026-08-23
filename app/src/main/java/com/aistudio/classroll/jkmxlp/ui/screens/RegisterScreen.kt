@@ -2,6 +2,7 @@ package com.aistudio.classroll.jkmxlp.ui.screens
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -16,8 +17,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.ArrowForward
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -27,12 +30,15 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aistudio.classroll.jkmxlp.data.AttendanceRecordEntity
 import com.aistudio.classroll.jkmxlp.ui.ClassRollViewModel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
@@ -65,6 +71,33 @@ fun RegisterScreen(viewModel: ClassRollViewModel) {
     
     var showCsvExportDialog by remember { mutableStateOf(false) }
     var summaryDate by remember { mutableStateOf<String?>(null) }
+    
+    // Holiday toggle confirmation & 5-second undo state
+    var holidayConfirmDate by remember { mutableStateOf<String?>(null) }
+    var undoDate by remember { mutableStateOf<String?>(null) }
+    var undoMessage by remember { mutableStateOf("") }
+    var undoRemainingSeconds by remember { mutableIntStateOf(5) }
+
+    val coroutineScope = rememberCoroutineScope()
+
+    // 5-second timer countdown for undo
+    LaunchedEffect(undoDate) {
+        if (undoDate != null) {
+            undoRemainingSeconds = 5
+            while (undoRemainingSeconds > 0) {
+                delay(1000L)
+                undoRemainingSeconds--
+            }
+            undoDate = null
+            undoMessage = ""
+        }
+    }
+
+    fun triggerHolidayToggleWithUndo(date: String, wasHoliday: Boolean) {
+        viewModel.toggleHoliday(date)
+        undoDate = date
+        undoMessage = if (wasHoliday) "Removed holiday for $date" else "Marked $date as Holiday"
+    }
 
     val clipboardManager = LocalClipboardManager.current
     var copyMessage by remember { mutableStateOf("") }
@@ -155,8 +188,80 @@ fun RegisterScreen(viewModel: ClassRollViewModel) {
         )
     }
 
+    // Holiday Toggle Confirmation Dialog
+    if (holidayConfirmDate != null) {
+        val confirmDate = holidayConfirmDate!!
+        val activeStudents = remember(students) { students.filter { it.name.isNotBlank() } }
+        val presentCount = activeStudents.count { attendanceMap[it.roll]?.get(confirmDate)?.status == "P" }
+        val absentCount = activeStudents.count { attendanceMap[it.roll]?.get(confirmDate)?.status == "A" }
+        val isAlreadyHoliday = holidays.contains(confirmDate)
+
+        AlertDialog(
+            onDismissRequest = { holidayConfirmDate = null },
+            icon = {
+                Icon(
+                    imageVector = Icons.Default.Warning,
+                    contentDescription = "Confirmation Warning",
+                    tint = MaterialTheme.colorScheme.tertiary
+                )
+            },
+            title = {
+                Text(
+                    text = if (isAlreadyHoliday) "Clear Holiday Status?" else "Mark as Holiday (Off Day)?",
+                    style = MaterialTheme.typography.titleMedium
+                )
+            },
+            text = {
+                Column {
+                    Text(
+                        text = "Date: ${formatFullDisplayDate(confirmDate)}",
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    if (!isAlreadyHoliday && (presentCount > 0 || absentCount > 0)) {
+                        Text(
+                            text = "⚠️ Attendance has already been taken on this day ($presentCount Present, $absentCount Absent).\n\nMarking it as a Holiday will display 'OFF' in the monthly register column.\n\n(Don't worry: your attendance records are safely kept and you will have 5 seconds to Undo).",
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    } else if (!isAlreadyHoliday) {
+                        Text(
+                            text = "This will mark this day as a School Holiday (OFF) in the monthly register. You will have 5 seconds to undo.",
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    } else {
+                        Text(
+                            text = "This will re-open this day as a regular school day in the register. Any previously recorded attendance will be shown.",
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val wasHoliday = isAlreadyHoliday
+                        holidayConfirmDate = null
+                        summaryDate = null
+                        triggerHolidayToggleWithUndo(confirmDate, wasHoliday)
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (isAlreadyHoliday) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.tertiary
+                    )
+                ) {
+                    Text(if (isAlreadyHoliday) "Clear Holiday" else "Yes, Mark Holiday")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { holidayConfirmDate = null }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
     // Date Press-and-Hold Summary Dialog
-    if (summaryDate != null) {
+    if (summaryDate != null && holidayConfirmDate == null) {
         val selDate = summaryDate!!
         val isCustomHoliday = holidays.contains(selDate)
         val isWeekendDay = isWeekend(selDate)
@@ -190,8 +295,8 @@ fun RegisterScreen(viewModel: ClassRollViewModel) {
                     ) {
                         Text(
                             text = when {
-                                isCustomHoliday -> "🌴 School Holiday (Off)"
-                                isWeekendDay -> "📅 Weekend (Friday / Saturday)"
+                                isCustomHoliday -> "🌴 School Holiday (Off Day)"
+                                isWeekendDay -> "📅 Weekend (Friday / Saturday - Fixed Off)"
                                 else -> "📖 Regular School Day"
                             },
                             style = MaterialTheme.typography.labelMedium,
@@ -315,11 +420,13 @@ fun RegisterScreen(viewModel: ClassRollViewModel) {
                 }
             },
             confirmButton = {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(onClick = {
-                        viewModel.toggleHoliday(selDate)
-                    }) {
-                        Text(if (isCustomHoliday) "Clear Holiday" else "🌴 Toggle Holiday")
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    if (!isWeekendDay) {
+                        OutlinedButton(onClick = {
+                            holidayConfirmDate = selDate
+                        }) {
+                            Text(if (isCustomHoliday) "Clear Holiday" else "🌴 Toggle Holiday")
+                        }
                     }
                     TextButton(onClick = { summaryDate = null }) {
                         Text("Close")
@@ -401,235 +508,317 @@ fun RegisterScreen(viewModel: ClassRollViewModel) {
             }
         }
     ) { innerPadding ->
-        Column(Modifier.fillMaxSize().padding(innerPadding)) {
-            // Top Bar with Navigation & Export
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 8.dp, vertical = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                IconButton(onClick = {
-                    val cal = selectedCalendar.clone() as Calendar
-                    cal.add(Calendar.MONTH, -1)
-                    selectedCalendar = cal
-                }) {
-                    Icon(Icons.Default.ArrowBack, contentDescription = "Previous Month")
-                }
-
-                Text("Register: $selectedMonthTitle", style = MaterialTheme.typography.titleLarge)
-
-                Row {
-                    IconButton(onClick = { showCsvExportDialog = true }) {
-                        Icon(Icons.Default.Share, contentDescription = "Export CSV")
-                    }
+        Box(
+            Modifier
+                .fillMaxSize()
+                .padding(innerPadding)
+        ) {
+            Column(Modifier.fillMaxSize()) {
+                // Top Bar with Navigation & Export
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
                     IconButton(onClick = {
                         val cal = selectedCalendar.clone() as Calendar
-                        cal.add(Calendar.MONTH, 1)
+                        cal.add(Calendar.MONTH, -1)
                         selectedCalendar = cal
                     }) {
-                        Icon(Icons.Default.ArrowForward, contentDescription = "Next Month")
+                        Icon(Icons.Default.ArrowBack, contentDescription = "Previous Month")
+                    }
+
+                    Text("Register: $selectedMonthTitle", style = MaterialTheme.typography.titleLarge)
+
+                    Row {
+                        IconButton(onClick = { showCsvExportDialog = true }) {
+                            Icon(Icons.Default.Share, contentDescription = "Export CSV")
+                        }
+                        IconButton(onClick = {
+                            val cal = selectedCalendar.clone() as Calendar
+                            cal.add(Calendar.MONTH, 1)
+                            selectedCalendar = cal
+                        }) {
+                            Icon(Icons.Default.ArrowForward, contentDescription = "Next Month")
+                        }
                     }
                 }
-            }
 
-            // Search Bar
-            OutlinedTextField(
-                value = searchQuery,
-                onValueChange = { searchQuery = it },
-                placeholder = { Text("Search by name or roll...") },
-                leadingIcon = { Icon(Icons.Default.Search, contentDescription = "Search") },
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
-                singleLine = true
-            )
+                // Search Bar
+                OutlinedTextField(
+                    value = searchQuery,
+                    onValueChange = { searchQuery = it },
+                    placeholder = { Text("Search by name or roll...") },
+                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = "Search") },
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
+                    singleLine = true
+                )
 
-            // Hint row
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 14.dp, vertical = 2.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Info,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(15.dp)
-                )
-                Spacer(Modifier.width(4.dp))
-                Text(
-                    text = "Press & hold any date header for summary & holiday options.",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-            
-            if (filteredStudents.isEmpty()) {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text("No matching students found.")
+                // Hint row
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 14.dp, vertical = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Info,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(15.dp)
+                    )
+                    Spacer(Modifier.width(4.dp))
+                    Text(
+                        text = "Fri & Sat are fixed weekends. Press & hold date header for summary & holiday.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
-            } else {
-                Column(Modifier.weight(1f)) {
-                    // Header Row (Sticky Roll/Name Header + Scrollable Dates)
-                    Row(
-                        Modifier
-                            .fillMaxWidth()
-                            .height(52.dp)
-                    ) {
-                        Box(
-                            Modifier
-                                .width(130.dp)
-                                .fillMaxHeight()
-                                .background(MaterialTheme.colorScheme.surfaceVariant)
-                                .border(1.dp, Color.Gray),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text("Roll / Name", style = MaterialTheme.typography.labelSmall)
-                        }
-
+                
+                if (filteredStudents.isEmpty()) {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Text("No matching students found.")
+                    }
+                } else {
+                    Column(Modifier.weight(1f)) {
+                        // Header Row (Sticky Roll/Name Header + Scrollable Dates)
                         Row(
                             Modifier
                                 .fillMaxWidth()
-                                .fillMaxHeight()
-                                .horizontalScroll(horizontalScrollState)
-                                .background(MaterialTheme.colorScheme.surfaceVariant)
+                                .height(52.dp)
                         ) {
-                            dates.forEach { date ->
-                                val dayStr = date.substringAfterLast("-")
-                                val dayOfWeek = getDayOfWeekShort(date)
-                                val isWeekendDay = isWeekend(date)
-                                val isCustomHoliday = holidays.contains(date)
+                            Box(
+                                Modifier
+                                    .width(130.dp)
+                                    .fillMaxHeight()
+                                    .background(MaterialTheme.colorScheme.surfaceVariant)
+                                    .border(1.dp, Color.Gray),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text("Roll / Name", style = MaterialTheme.typography.labelSmall)
+                            }
 
-                                val headerBg = when {
-                                    isCustomHoliday -> MaterialTheme.colorScheme.tertiaryContainer
-                                    isWeekendDay -> MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.7f)
-                                    else -> MaterialTheme.colorScheme.surfaceVariant
-                                }
+                            Row(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .fillMaxHeight()
+                                    .horizontalScroll(horizontalScrollState)
+                                    .background(MaterialTheme.colorScheme.surfaceVariant)
+                            ) {
+                                dates.forEach { date ->
+                                    val dayStr = date.substringAfterLast("-")
+                                    val dayOfWeek = getDayOfWeekShort(date)
+                                    val isWeekendDay = isWeekend(date)
+                                    val isCustomHoliday = holidays.contains(date)
 
-                                Box(
-                                    Modifier
-                                        .width(48.dp)
-                                        .fillMaxHeight()
-                                        .background(headerBg)
-                                        .border(1.dp, Color.Gray)
-                                        .pointerInput(date) {
-                                            detectTapGestures(
-                                                onTap = { summaryDate = date },
-                                                onLongPress = { summaryDate = date }
+                                    val headerBg = when {
+                                        isCustomHoliday -> MaterialTheme.colorScheme.tertiaryContainer
+                                        isWeekendDay -> MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.85f)
+                                        else -> MaterialTheme.colorScheme.surfaceVariant
+                                    }
+
+                                    Box(
+                                        Modifier
+                                            .width(48.dp)
+                                            .fillMaxHeight()
+                                            .background(headerBg)
+                                            .border(1.dp, Color.Gray)
+                                            .pointerInput(date) {
+                                                detectTapGestures(
+                                                    onTap = { summaryDate = date },
+                                                    onLongPress = { summaryDate = date }
+                                                )
+                                            },
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                            Text(
+                                                dayStr,
+                                                style = MaterialTheme.typography.labelSmall,
+                                                fontWeight = if (isWeekendDay || isCustomHoliday) FontWeight.Bold else FontWeight.Normal
                                             )
-                                        },
-                                    contentAlignment = Alignment.Center
+                                            Text(
+                                                text = if (isCustomHoliday) "Off" else dayOfWeek,
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = when {
+                                                    isCustomHoliday -> MaterialTheme.colorScheme.onTertiaryContainer
+                                                    isWeekendDay -> MaterialTheme.colorScheme.onSecondaryContainer
+                                                    else -> Color.Gray
+                                                }
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // LazyColumn for Student Rows
+                        LazyColumn(Modifier.fillMaxWidth().weight(1f)) {
+                            items(filteredStudents, key = { it.roll }) { student ->
+                                Row(
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .height(48.dp)
                                 ) {
-                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                        Text(dayStr, style = MaterialTheme.typography.labelSmall)
+                                    // Sticky Left Student Roll/Name Cell
+                                    Box(
+                                        Modifier
+                                            .width(130.dp)
+                                            .fillMaxHeight()
+                                            .border(1.dp, Color.Gray)
+                                            .padding(4.dp)
+                                            .clickable {
+                                                editingStudentRoll = student.roll
+                                                editingStudentName = student.name
+                                                showStudentDialog = true
+                                            },
+                                        contentAlignment = Alignment.CenterStart
+                                    ) {
                                         Text(
-                                            text = if (isCustomHoliday) "Off" else dayOfWeek,
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = when {
-                                                isCustomHoliday -> MaterialTheme.colorScheme.onTertiaryContainer
-                                                isWeekendDay -> MaterialTheme.colorScheme.onSecondaryContainer
-                                                else -> Color.Gray
-                                            }
+                                            "${student.roll} ${student.name}",
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                            style = MaterialTheme.typography.bodySmall
                                         )
+                                    }
+
+                                    // Attendance Cells Row
+                                    Row(
+                                        Modifier
+                                            .fillMaxWidth()
+                                            .fillMaxHeight()
+                                            .horizontalScroll(horizontalScrollState)
+                                    ) {
+                                        dates.forEach { date ->
+                                            val record = attendanceMap[student.roll]?.get(date)
+                                            val status = record?.status ?: ""
+                                            val isWeekendDay = isWeekend(date)
+                                            val isCustomHoliday = holidays.contains(date)
+
+                                            // Styling for cell
+                                            val cellColor = when {
+                                                isWeekendDay -> MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.35f)
+                                                isCustomHoliday -> MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.35f)
+                                                status == "P" -> Color(0xFFC8E6C9)
+                                                status == "A" -> Color(0xFFFFCDD2)
+                                                else -> Color.Transparent
+                                            }
+
+                                            val displayText = when {
+                                                isWeekendDay -> "W"
+                                                isCustomHoliday -> "OFF"
+                                                status.isNotBlank() -> status
+                                                else -> ""
+                                            }
+
+                                            val textColor = when {
+                                                isWeekendDay -> MaterialTheme.colorScheme.outline
+                                                isCustomHoliday -> MaterialTheme.colorScheme.tertiary
+                                                status == "P" -> Color(0xFF1B5E20)
+                                                status == "A" -> Color(0xFFB71C1C)
+                                                else -> MaterialTheme.colorScheme.onSurface
+                                            }
+
+                                            // Weekend & Custom Holidays are locked/non-editable by tapping the cell
+                                            val isCellEditable = !isWeekendDay && !isCustomHoliday
+
+                                            Box(
+                                                Modifier
+                                                    .width(48.dp)
+                                                    .fillMaxHeight()
+                                                    .background(cellColor)
+                                                    .border(1.dp, Color.Gray.copy(alpha = 0.6f))
+                                                    .then(
+                                                        if (isCellEditable) {
+                                                            Modifier.clickable {
+                                                                val nextStatus = when (status) {
+                                                                    "" -> "P"
+                                                                    "P" -> "A"
+                                                                    else -> ""
+                                                                }
+                                                                viewModel.updateCell(date, student.roll, nextStatus)
+                                                            }
+                                                        } else {
+                                                            Modifier
+                                                        }
+                                                    ),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Text(
+                                                    text = displayText,
+                                                    textAlign = TextAlign.Center,
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    fontWeight = if (isWeekendDay || isCustomHoliday) FontWeight.SemiBold else FontWeight.Normal,
+                                                    color = textColor
+                                                )
+                                            }
+                                        }
                                     }
                                 }
                             }
                         }
                     }
+                }
+            }
 
-                    // LazyColumn for Student Rows
-                    LazyColumn(Modifier.fillMaxWidth().weight(1f)) {
-                        items(filteredStudents, key = { it.roll }) { student ->
-                            Row(
-                                Modifier
-                                    .fillMaxWidth()
-                                    .height(48.dp)
-                            ) {
-                                // Sticky Left Student Roll/Name Cell
-                                Box(
-                                    Modifier
-                                        .width(130.dp)
-                                        .fillMaxHeight()
-                                        .border(1.dp, Color.Gray)
-                                        .padding(4.dp)
-                                        .clickable {
-                                            editingStudentRoll = student.roll
-                                            editingStudentName = student.name
-                                            showStudentDialog = true
-                                        },
-                                    contentAlignment = Alignment.CenterStart
-                                ) {
-                                    Text(
-                                        "${student.roll} ${student.name}",
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                        style = MaterialTheme.typography.bodySmall
-                                    )
+            // 5-Second Animated Undo Floating Banner
+            AnimatedVisibility(
+                visible = undoDate != null,
+                enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
+                exit = slideOutVertically(targetOffsetY = { it }) + fadeOut(),
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 72.dp, start = 16.dp, end = 16.dp)
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(16.dp),
+                    color = MaterialTheme.colorScheme.inverseSurface,
+                    shadowElevation = 8.dp,
+                    modifier = Modifier.fillMaxWidth().wrapContentHeight()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = undoMessage,
+                                color = MaterialTheme.colorScheme.inverseOnSurface,
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.Medium
+                            )
+                            Text(
+                                text = "Auto-closing in ${undoRemainingSeconds}s...",
+                                color = MaterialTheme.colorScheme.inverseOnSurface.copy(alpha = 0.7f),
+                                style = MaterialTheme.typography.labelSmall
+                            )
+                        }
+
+                        Button(
+                            onClick = {
+                                val targetDate = undoDate
+                                if (targetDate != null) {
+                                    viewModel.toggleHoliday(targetDate)
+                                    undoDate = null
+                                    undoMessage = ""
                                 }
-
-                                // Attendance Cells Row
-                                Row(
-                                    Modifier
-                                        .fillMaxWidth()
-                                        .fillMaxHeight()
-                                        .horizontalScroll(horizontalScrollState)
-                                ) {
-                                    dates.forEach { date ->
-                                        val record = attendanceMap[student.roll]?.get(date)
-                                        val status = record?.status ?: ""
-                                        val isWeekendDay = isWeekend(date)
-                                        val isCustomHoliday = holidays.contains(date)
-
-                                        val cellColor = when {
-                                            status == "P" -> Color(0xFFC8E6C9)
-                                            status == "A" -> Color(0xFFFFCDD2)
-                                            isCustomHoliday -> MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.35f)
-                                            isWeekendDay -> MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.25f)
-                                            else -> Color.Transparent
-                                        }
-
-                                        val displayText = when {
-                                            status.isNotBlank() -> status
-                                            isCustomHoliday -> "OFF"
-                                            isWeekendDay -> "W"
-                                            else -> ""
-                                        }
-
-                                        val textColor = when {
-                                            status == "P" -> Color(0xFF1B5E20)
-                                            status == "A" -> Color(0xFFB71C1C)
-                                            isCustomHoliday -> MaterialTheme.colorScheme.tertiary
-                                            isWeekendDay -> MaterialTheme.colorScheme.outline
-                                            else -> MaterialTheme.colorScheme.onSurface
-                                        }
-
-                                        Box(
-                                            Modifier
-                                                .width(48.dp)
-                                                .fillMaxHeight()
-                                                .background(cellColor)
-                                                .border(1.dp, Color.Gray)
-                                                .clickable {
-                                                    val nextStatus = when (status) {
-                                                        "" -> "P"
-                                                        "P" -> "A"
-                                                        else -> ""
-                                                    }
-                                                    viewModel.updateCell(date, student.roll, nextStatus)
-                                                },
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            Text(
-                                                text = displayText,
-                                                textAlign = TextAlign.Center,
-                                                style = MaterialTheme.typography.labelSmall,
-                                                color = textColor
-                                            )
-                                        }
-                                    }
-                                }
-                            }
+                            },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.inversePrimary,
+                                contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                            ),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Refresh,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(Modifier.width(4.dp))
+                            Text("UNDO (${undoRemainingSeconds}s)", fontWeight = FontWeight.Bold)
                         }
                     }
                 }
