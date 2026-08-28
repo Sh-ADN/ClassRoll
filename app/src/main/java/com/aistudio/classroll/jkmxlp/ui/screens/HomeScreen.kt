@@ -17,6 +17,7 @@ import com.aistudio.classroll.jkmxlp.data.StudentEntity
 import com.aistudio.classroll.jkmxlp.ui.ClassRollViewModel
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
+import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 
@@ -26,6 +27,7 @@ fun HomeScreen(viewModel: ClassRollViewModel) {
     val students by viewModel.students.collectAsStateWithLifecycle()
     val activeStudents = remember(students) { students.filter { it.name.isNotBlank() } }
     val currentYear by viewModel.currentYear.collectAsStateWithLifecycle()
+    val holidays by viewModel.holidays.collectAsStateWithLifecycle()
     var currentIndex by remember { mutableStateOf(0) }
     var date by remember { mutableStateOf(SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())) }
     var showDatePicker by remember { mutableStateOf(false) }
@@ -91,6 +93,58 @@ fun HomeScreen(viewModel: ClassRollViewModel) {
     }
 
     val displayDate = remember(date) { formatDisplayDate(date) }
+
+    val isWeekendDay = remember(date) { isWeekend(date) }
+    val isCustomHoliday = remember(date, holidays) { holidays.contains(date) }
+
+    if (isWeekendDay || isCustomHoliday) {
+        Column(Modifier.fillMaxSize().padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Attendance for $displayDate", style = MaterialTheme.typography.titleLarge)
+                    IconButton(onClick = { showDatePicker = true }) {
+                        Icon(Icons.Default.DateRange, contentDescription = "Select Date")
+                    }
+                }
+            }
+            
+            Spacer(Modifier.height(48.dp))
+            
+            val reason = if (isWeekendDay) "Weekend (Friday/Saturday)" else "School Holiday"
+            val emoji = if (isWeekendDay) "📅" else "🌴"
+            
+            Card(
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                modifier = Modifier.fillMaxWidth().padding(16.dp)
+            ) {
+                Column(
+                    modifier = Modifier.padding(24.dp).fillMaxWidth(),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
+                ) {
+                    Text(emoji, style = MaterialTheme.typography.displayLarge)
+                    Spacer(Modifier.height(16.dp))
+                    Text(
+                        text = "School is Off",
+                        style = MaterialTheme.typography.headlineMedium,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        text = "This day is marked as a $reason. Attendance taking is disabled.",
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                    )
+                }
+            }
+        }
+        return
+    }
 
     if (currentIndex >= activeStudents.size) {
         val presentCount = dateRecords.count { it.status == "P" }
@@ -505,5 +559,16 @@ private fun formatDisplayDate(dateString: String): String {
         "${day}${suffix} $monthYear"
     } catch (e: Exception) {
         dateString
+    }
+}
+
+private fun isWeekend(dateStr: String): Boolean {
+    return try {
+        val date = SimpleDateFormat("yyyy-MM-dd", Locale.US).parse(dateStr) ?: return false
+        val cal = Calendar.getInstance().apply { time = date }
+        val dayOfWeek = cal.get(Calendar.DAY_OF_WEEK)
+        dayOfWeek == Calendar.FRIDAY || dayOfWeek == Calendar.SATURDAY
+    } catch (e: Exception) {
+        false
     }
 }
