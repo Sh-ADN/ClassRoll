@@ -115,7 +115,17 @@ fun HomeScreen(viewModel: ClassRollViewModel) {
             Spacer(Modifier.height(48.dp))
             
             val reason = if (isWeekendDay) "Weekend (Friday/Saturday)" else "School Holiday"
-            val emoji = if (isWeekendDay) "📅" else "🌴"
+            
+            val calendarIconDate = remember(date) {
+                try {
+                    val d = SimpleDateFormat("yyyy-MM-dd", Locale.US).parse(date) ?: Date()
+                    val m = SimpleDateFormat("MMM", Locale.US).format(d).uppercase(Locale.US)
+                    val dy = SimpleDateFormat("d", Locale.US).format(d)
+                    Pair(m, dy)
+                } catch (e: Exception) {
+                    Pair("---", "-")
+                }
+            }
             
             Card(
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
@@ -126,7 +136,42 @@ fun HomeScreen(viewModel: ClassRollViewModel) {
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center
                 ) {
-                    Text(emoji, style = MaterialTheme.typography.displayLarge)
+                    Card(
+                        modifier = Modifier.size(72.dp),
+                        shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 6.dp)
+                    ) {
+                        Column(Modifier.fillMaxSize()) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .weight(0.35f)
+                                    .background(if (isCustomHoliday && !isWeekendDay) Color(0xFF00897B) else Color(0xFFE53935)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = calendarIconDate.first,
+                                    color = Color.White,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = androidx.compose.ui.text.font.FontWeight.Bold
+                                )
+                            }
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .weight(0.65f),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = calendarIconDate.second,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    style = MaterialTheme.typography.headlineMedium,
+                                    fontWeight = androidx.compose.ui.text.font.FontWeight.Bold
+                                )
+                            }
+                        }
+                    }
                     Spacer(Modifier.height(16.dp))
                     Text(
                         text = "School is Off",
