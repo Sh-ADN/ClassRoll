@@ -39,7 +39,9 @@ fun HomeScreen(viewModel: ClassRollViewModel) {
     val dateRecordsFlow = remember(date, currentYear) { viewModel.getAttendanceForDate(date) }
     val dateRecords by dateRecordsFlow.collectAsStateWithLifecycle(initialValue = emptyList())
 
-    val recordedRolls = remember(dateRecords) { dateRecords.map { it.roll }.toSet() }
+    val recordedRolls = remember(dateRecords) { 
+        dateRecords.filter { it.status.isNotBlank() }.map { it.roll }.toSet() 
+    }
 
     LaunchedEffect(dateRecords, activeStudents, date, currentYear) {
         if (activeStudents.isNotEmpty()) {
