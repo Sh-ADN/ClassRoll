@@ -24,25 +24,65 @@ jobs:
           distribution: temurin
           java-version: '21'
 
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Accept Android SDK Licenses
+        run: yes | sdkmanager --licenses || true
+
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v3
         with:
           gradle-version: 9.3.1
 
-      - name: Build release APK (unsigned)
-        run: gradle assembleRelease --stacktrace
+      - name: Build release APK
+        run: gradle assembleRelease --stacktrace --no-daemon
 
-      - name: Sign release APK
+      - name: Sign & Prepare APK
         id: sign_apk
-        uses: r0adkll/sign-android-release@v1
+        run: |
+          mkdir -p release_out
+          APK_FILE=$(find app/build/outputs/apk/release -name "*.apk" | head -n 1)
+          if [ -z "$APK_FILE" ]; then
+            echo "Error: No release APK found!"
+            exit 1
+          fi
+          echo "Found APK: $APK_FILE"
+
+          if [ -n "${{ secrets.KEYSTORE_BASE64 }}" ]; then
+            echo "Signing with repository secret keystore..."
+            echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > release.keystore
+            KEY_ALIAS="${{ secrets.KEY_ALIAS }}"
+            KEYSTORE_PASS="${{ secrets.KEYSTORE_PASSWORD }}"
+            KEY_PASS="${{ secrets.KEY_PASSWORD }}"
+            jarsigner -verbose -sigalg SHA256withRSA -digestalg SHA-256 \
+              -keystore release.keystore \
+              -storepass "$KEYSTORE_PASS" \
+              -keypass "${KEY_PASS:-$KEYSTORE_PASS}" \
+              "$APK_FILE" "$KEY_ALIAS"
+          else
+            echo "No custom keystore secret provided; generating self-signed keystore for installation..."
+            keytool -genkeypair -v -keystore release.keystore -alias releasekey \
+              -keyalg RSA -keysize 2048 -validity 10000 \
+              -storepass android -keypass android \
+              -dname "CN=ClassRoll, OU=App, O=AIStudio, L=City, S=State, C=US"
+            jarsigner -verbose -sigalg SHA256withRSA -digestalg SHA-256 \
+              -keystore release.keystore \
+              -storepass android \
+              -keypass android \
+              "$APK_FILE" releasekey
+          fi
+
+          FINAL_APK="release_out/ClassRoll-build-${{ github.run_number }}.apk"
+          cp "$APK_FILE" "$FINAL_APK"
+          echo "signed_apk=$FINAL_APK" >> "$GITHUB_OUTPUT"
+
+      - name: Upload APK Artifact
+        uses: actions/upload-artifact@v4
         with:
-          releaseDirectory: app/build/outputs/apk/release
-          signingKeyBase64: ${{ secrets.KEYSTORE_BASE64 }}
-          alias: ${{ secrets.KEY_ALIAS }}
-          keyStorePassword: ${{ secrets.KEYSTORE_PASSWORD }}
-          keyPassword: ${{ secrets.KEY_PASSWORD }}
-        env:
-          BUILD_TOOLS_VERSION: "34.0.0"
+          name: ClassRoll-APK
+          path: ${{ steps.sign_apk.outputs.signed_apk }}
+          retention-days: 30
 
       - name: Set build tag
         id: vars
@@ -50,10 +90,11 @@ jobs:
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/heads/main') || github.event_name == 'workflow_dispatch'
         with:
           tag_name: ${{ steps.vars.outputs.tag }}
           name: "সমাগত খেরোখাতা – build ${{ github.run_number }}"
           make_latest: true
-          files: ${{ steps.sign_apk.outputs.signedReleaseFile }}
+          files: ${{ steps.sign_apk.outputs.signed_apk }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

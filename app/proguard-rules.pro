@@ -1,8 +1,6 @@
 # ProGuard & R8 Release Build Optimization Rules
 
--optimizationpasses 5
 -dontpreverify
--repackageclasses ''
 -allowaccessmodification
 
 # Remove debug attributes and line numbers to shrink APK metadata
