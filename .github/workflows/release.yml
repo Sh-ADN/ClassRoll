@@ -61,11 +61,12 @@ jobs:
 
       - name: Setup Google Services Configuration
         run: |
-          mkdir -p app/src/main app/src/release
+          mkdir -p app/src/main app/src/release app/src/Release
           if [ -n "${{ secrets.GOOGLE_SERVICES_JSON }}" ]; then
             echo "Restoring google-services.json from repository secret GOOGLE_SERVICES_JSON..."
             echo "${{ secrets.GOOGLE_SERVICES_JSON }}" > app/google-services.json
-          elif [ ! -f "app/google-services.json" ]; then
+          fi
+          if [ ! -s "app/google-services.json" ]; then
             echo "Creating google-services.json configuration..."
             cat << 'EOF' > app/google-services.json
 {
@@ -116,12 +117,12 @@ jobs:
   "configuration_version": "1"
 }
 EOF
-          else
-            echo "Existing app/google-services.json found."
           fi
-          cp -f app/google-services.json app/src/google-services.json 2>/dev/null || true
-          cp -f app/google-services.json app/src/main/google-services.json 2>/dev/null || true
-          cp -f app/google-services.json app/src/release/google-services.json 2>/dev/null || true
+          cp -f app/google-services.json app/src/google-services.json
+          cp -f app/google-services.json app/src/main/google-services.json
+          cp -f app/google-services.json app/src/release/google-services.json
+          cp -f app/google-services.json app/src/Release/google-services.json
+
 
 
       - name: Build Release APK
