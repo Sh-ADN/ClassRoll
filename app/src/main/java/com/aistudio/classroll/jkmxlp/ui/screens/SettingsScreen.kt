@@ -5,6 +5,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AccountBox
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -23,9 +25,14 @@ import java.util.Locale
 import java.util.concurrent.TimeUnit
 
 @Composable
-fun SettingsScreen(viewModel: ClassRollViewModel) {
+fun SettingsScreen(
+    viewModel: ClassRollViewModel,
+    authManager: com.aistudio.classroll.jkmxlp.data.AuthManager? = null
+) {
     val currentYear by viewModel.currentYear.collectAsStateWithLifecycle()
     val currentThemeMode by viewModel.appTheme.collectAsStateWithLifecycle()
+    val isCloudSyncing by viewModel.isCloudSyncing.collectAsStateWithLifecycle()
+    val coroutineScope = rememberCoroutineScope()
     var yearInput by remember(currentYear) { mutableStateOf(currentYear) }
     var showClearAttendanceDialog by remember { mutableStateOf(false) }
     var showClearStudentsDialog by remember { mutableStateOf(false) }
@@ -253,6 +260,93 @@ fun SettingsScreen(viewModel: ClassRollViewModel) {
     val scrollState = rememberScrollState()
 
     Column(modifier = Modifier.fillMaxSize().verticalScroll(scrollState).padding(16.dp)) {
+        // Cloud Account & Sync Section
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f))
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Surface(
+                        shape = MaterialTheme.shapes.medium,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(44.dp)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                Icons.Default.AccountBox,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onPrimary,
+                                modifier = Modifier.size(28.dp)
+                            )
+                        }
+                    }
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = authManager?.currentUser?.displayName?.ifBlank { "Teacher Account" } ?: "Teacher Account",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            text = authManager?.currentUser?.email ?: "Signed in with Google",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    FilledTonalButton(
+                        onClick = {
+                            viewModel.syncToCloud { success, msg -> statusMessage = msg }
+                        },
+                        enabled = !isCloudSyncing,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        if (isCloudSyncing) {
+                            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                        } else {
+                            Text("Backup to Cloud", style = MaterialTheme.typography.labelMedium)
+                        }
+                    }
+
+                    FilledTonalButton(
+                        onClick = {
+                            viewModel.restoreFromCloud { success, msg -> statusMessage = msg }
+                        },
+                        enabled = !isCloudSyncing,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("Restore Cloud", style = MaterialTheme.typography.labelMedium)
+                    }
+                }
+
+                authManager?.let { auth ->
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedButton(
+                        onClick = {
+                            auth.signOut(coroutineScope)
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Sign Out")
+                    }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(20.dp))
+        HorizontalDivider()
+        Spacer(modifier = Modifier.height(16.dp))
+
         // App Theme Selector Section
         Text("App Theme & Dark Mode", style = MaterialTheme.typography.titleLarge)
         Spacer(modifier = Modifier.height(12.dp))

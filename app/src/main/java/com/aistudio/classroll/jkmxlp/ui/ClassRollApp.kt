@@ -13,7 +13,10 @@ import androidx.navigation.compose.rememberNavController
 import com.aistudio.classroll.jkmxlp.ui.screens.*
 
 @Composable
-fun ClassRollApp(viewModel: ClassRollViewModel) {
+fun ClassRollApp(
+    viewModel: ClassRollViewModel,
+    authManager: com.aistudio.classroll.jkmxlp.data.AuthManager? = null
+) {
     val navController = rememberNavController()
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = backStackEntry?.destination?.route ?: Routes.Home
@@ -69,7 +72,7 @@ fun ClassRollApp(viewModel: ClassRollViewModel) {
             composable(Routes.Register) { RegisterScreen(viewModel) }
             composable(Routes.Summary) { SummaryDashboardScreen(viewModel) }
             composable(Routes.ImportStudents) { ImportStudentsScreen(viewModel) }
-            composable(Routes.Settings) { SettingsScreen(viewModel) }
+            composable(Routes.Settings) { SettingsScreen(viewModel, authManager) }
         }
     }
 }

@@ -1,0 +1,120 @@
+{
+  "entities": {
+    "Student": {
+      "title": "Student",
+      "description": "A student in the class roster for a specific academic year.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "The UID of the authenticated teacher who owns this student record."
+        },
+        "year": {
+          "type": "string",
+          "description": "Academic year string, e.g. 2026 or 2025-2026."
+        },
+        "roll": {
+          "type": "string",
+          "description": "Roll or seat number of the student."
+        },
+        "name": {
+          "type": "string",
+          "description": "Full name of the student."
+        },
+        "active": {
+          "type": "boolean",
+          "description": "Whether the student is actively enrolled in attendance taking."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Timestamp when this record was created. Must be FieldValue.serverTimestamp()."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Timestamp when this record was last updated. Must be FieldValue.serverTimestamp()."
+        }
+      },
+      "required": ["userId", "year", "roll", "name", "active"]
+    },
+    "AttendanceRecord": {
+      "title": "AttendanceRecord",
+      "description": "A daily attendance log entry for a specific student.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "The UID of the authenticated teacher who owns this record."
+        },
+        "year": {
+          "type": "string",
+          "description": "Academic year corresponding to this attendance entry."
+        },
+        "date": {
+          "type": "string",
+          "description": "Date of attendance in YYYY-MM-DD format."
+        },
+        "roll": {
+          "type": "string",
+          "description": "Roll number of the student."
+        },
+        "status": {
+          "type": "string",
+          "enum": ["P", "A"],
+          "description": "Attendance status (P for Present, A for Absent)."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Timestamp when this record was created. Must be FieldValue.serverTimestamp()."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Timestamp when this record was last updated. Must be FieldValue.serverTimestamp()."
+        }
+      },
+      "required": ["userId", "year", "date", "roll", "status"]
+    },
+    "UserSettings": {
+      "title": "UserSettings",
+      "description": "User preferences and active academic year configuration.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "The UID of the authenticated teacher."
+        },
+        "academicYear": {
+          "type": "string",
+          "description": "Currently active academic year."
+        },
+        "appTheme": {
+          "type": "string",
+          "description": "UI theme selection (SYSTEM, LIGHT, DARK)."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Timestamp when settings were last modified."
+        }
+      },
+      "required": ["userId"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}/students/{studentId}": {
+      "schema": "Student",
+      "description": "Roster of students managed by the teacher."
+    },
+    "/users/{userId}/attendance/{recordId}": {
+      "schema": "AttendanceRecord",
+      "description": "Daily attendance logs taken by the teacher."
+    },
+    "/users/{userId}/settings/{settingsId}": {
+      "schema": "UserSettings",
+      "description": "Preferences and configuration for the teacher."
+    }
+  }
+}

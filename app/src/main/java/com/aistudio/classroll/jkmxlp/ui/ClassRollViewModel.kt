@@ -33,6 +33,10 @@ class ClassRollViewModel(application: Application) : AndroidViewModel(applicatio
         .build()
     private val settingsRepo = SettingsRepository(application)
     val repository = ClassRollRepository(db.classRollDao(), NetworkModule.apiService, settingsRepo)
+    val firestoreRepo = com.aistudio.classroll.jkmxlp.data.FirestoreRepository(application)
+
+    private val _isCloudSyncing = MutableStateFlow(false)
+    val isCloudSyncing: StateFlow<Boolean> = _isCloudSyncing.asStateFlow()
 
     val webAppUrl = settingsRepo.webAppUrlFlow.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "https://script.google.com/macros/s/AKfycbzTDiNJh4LEaIah19SVFaf6JlESbW5tf2ElwaMULTDENIAlXFOFI4QAXEmV1nYwrVdA/exec")
     val currentYear = settingsRepo.academicYearFlow.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "")
@@ -147,6 +151,11 @@ class ClassRollViewModel(application: Application) : AndroidViewModel(applicatio
             _isSyncing.value = true
             val year = currentYear.value
             val success = repository.submitAttendance(year, date, records)
+            try {
+                records.forEach { firestoreRepo.saveAttendanceRecord(it) }
+            } catch (e: Exception) {
+                // Ignore background sync errors to preserve offline capability
+            }
             _isSyncing.value = false
             onResult(success)
         }
@@ -156,6 +165,11 @@ class ClassRollViewModel(application: Application) : AndroidViewModel(applicatio
         viewModelScope.launch {
             val year = currentYear.value
             repository.updateAttendanceCell(year, date, roll, status)
+            try {
+                firestoreRepo.saveAttendanceRecord(AttendanceRecordEntity(year, date, roll, status, isSynced = true))
+            } catch (e: Exception) {
+                // Ignore background sync errors
+            }
         }
     }
 
@@ -164,6 +178,11 @@ class ClassRollViewModel(application: Application) : AndroidViewModel(applicatio
             val year = currentYear.value
             if (year.isNotBlank()) {
                 repository.addOrUpdateStudent(year, roll, name)
+                try {
+                    firestoreRepo.saveStudent(StudentEntity(year, roll, name, true))
+                } catch (e: Exception) {
+                    // Ignore background sync errors
+                }
             }
         }
     }
@@ -173,6 +192,11 @@ class ClassRollViewModel(application: Application) : AndroidViewModel(applicatio
             val year = currentYear.value
             if (year.isNotBlank()) {
                 repository.deleteStudent(year, roll)
+                try {
+                    firestoreRepo.deleteStudent(year, roll)
+                } catch (e: Exception) {
+                    // Ignore background sync errors
+                }
             }
         }
     }
@@ -182,6 +206,11 @@ class ClassRollViewModel(application: Application) : AndroidViewModel(applicatio
             val year = currentYear.value
             if (year.isNotBlank()) {
                 repository.deleteAttendanceRecord(year, date, roll)
+                try {
+                    firestoreRepo.deleteAttendanceRecord(year, date, roll)
+                } catch (e: Exception) {
+                    // Ignore background sync errors
+                }
             }
         }
     }
@@ -191,6 +220,43 @@ class ClassRollViewModel(application: Application) : AndroidViewModel(applicatio
             val year = currentYear.value
             if (year.isNotBlank()) {
                 repository.clearAttendanceForDate(year, date)
+                try {
+                    firestoreRepo.clearAttendanceForDate(year, date)
+                } catch (e: Exception) {
+                    // Ignore background sync errors
+                }
+            }
+        }
+    }
+
+    fun syncToCloud(onComplete: (Boolean, String) -> Unit) {
+        viewModelScope.launch {
+            _isCloudSyncing.value = true
+            try {
+                val students = repository.getAllStudentsAllYears()
+                val records = repository.getAllAttendanceAllYears()
+                firestoreRepo.syncLocalToCloud(students, records)
+                onComplete(true, "Successfully backed up ${students.size} students and ${records.size} attendance records to Cloud Firestore!")
+            } catch (e: Exception) {
+                onComplete(false, e.localizedMessage ?: "Failed to sync to cloud")
+            } finally {
+                _isCloudSyncing.value = false
+            }
+        }
+    }
+
+    fun restoreFromCloud(onComplete: (Boolean, String) -> Unit) {
+        viewModelScope.launch {
+            _isCloudSyncing.value = true
+            try {
+                val (students, records) = firestoreRepo.pullCloudToLocal()
+                repository.restoreBackupData(students, records)
+                loadAvailableYears()
+                onComplete(true, "Successfully restored ${students.size} students and ${records.size} attendance records from Cloud Firestore!")
+            } catch (e: Exception) {
+                onComplete(false, e.localizedMessage ?: "Failed to restore from cloud")
+            } finally {
+                _isCloudSyncing.value = false
             }
         }
     }
