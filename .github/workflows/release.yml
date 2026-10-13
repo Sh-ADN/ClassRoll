@@ -59,6 +59,66 @@ jobs:
               -dname "CN=ClassRoll, OU=App, O=AIStudio, L=City, S=State, C=US"
           fi
 
+      - name: Setup Google Services Configuration
+        run: |
+          if [ -n "${{ secrets.GOOGLE_SERVICES_JSON }}" ]; then
+            echo "Restoring google-services.json from repository secret GOOGLE_SERVICES_JSON..."
+            echo "${{ secrets.GOOGLE_SERVICES_JSON }}" > app/google-services.json
+          elif [ ! -f "app/google-services.json" ]; then
+            echo "Creating google-services.json configuration..."
+            cat << 'EOF' > app/google-services.json
+{
+  "project_info": {
+    "project_number": "657750499614",
+    "project_id": "gen-lang-client-0269184419",
+    "storage_bucket": "gen-lang-client-0269184419.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:657750499614:android:867b393c7714dd5f1d690f",
+        "android_client_info": {
+          "package_name": "com.aistudio.classroll.jkmxlp"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "657750499614-11qkk1egv33laah5eq40rlatjio3b538.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.aistudio.classroll.jkmxlp",
+            "certificate_hash": "55a7157d505e08cbc325ea816ce7cf4ec278801d"
+          }
+        },
+        {
+          "client_id": "657750499614-goc2ljrqu9bt97gtt5do2brrttp9n6gj.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAR8ntGRu1L0HCc_ufey50p5vdWZIE_SkY"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "657750499614-goc2ljrqu9bt97gtt5do2brrttp9n6gj.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
+EOF
+          else
+            echo "Existing app/google-services.json found."
+          fi
+
       - name: Build Release APK
         env:
           STORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
