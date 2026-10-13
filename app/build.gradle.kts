@@ -7,6 +7,74 @@ plugins {
   alias(libs.plugins.google.services)
 }
 
+run {
+  val defaultJson = """
+    {
+      "project_info": {
+        "project_number": "657750499614",
+        "project_id": "gen-lang-client-0269184419",
+        "storage_bucket": "gen-lang-client-0269184419.firebasestorage.app"
+      },
+      "client": [
+        {
+          "client_info": {
+            "mobilesdk_app_id": "1:657750499614:android:867b393c7714dd5f1d690f",
+            "android_client_info": {
+              "package_name": "com.aistudio.classroll.jkmxlp"
+            }
+          },
+          "oauth_client": [
+            {
+              "client_id": "657750499614-11qkk1egv33laah5eq40rlatjio3b538.apps.googleusercontent.com",
+              "client_type": 1,
+              "android_info": {
+                "package_name": "com.aistudio.classroll.jkmxlp",
+                "certificate_hash": "55a7157d505e08cbc325ea816ce7cf4ec278801d"
+              }
+            },
+            {
+              "client_id": "657750499614-goc2ljrqu9bt97gtt5do2brrttp9n6gj.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ],
+          "api_key": [
+            {
+              "current_key": "AIzaSyAR8ntGRu1L0HCc_ufey50p5vdWZIE_SkY"
+            }
+          ],
+          "services": {
+            "appinvite_service": {
+              "other_platform_oauth_client": [
+                {
+                  "client_id": "657750499614-goc2ljrqu9bt97gtt5do2brrttp9n6gj.apps.googleusercontent.com",
+                  "client_type": 3
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "configuration_version": "1"
+    }
+  """.trimIndent()
+
+  val paths = listOf(
+    file("google-services.json"),
+    file("src/google-services.json"),
+    file("src/main/google-services.json"),
+    file("src/release/google-services.json")
+  )
+  val existing = paths.find { it.exists() }?.readText() ?: defaultJson
+  paths.forEach { f ->
+    if (!f.exists()) {
+      f.parentFile?.mkdirs()
+      f.writeText(existing)
+    }
+  }
+}
+
+
+
 android {
   namespace = "com.aistudio.classroll.jkmxlp"
   compileSdk { version = release(36) { minorApiLevel = 1 } }

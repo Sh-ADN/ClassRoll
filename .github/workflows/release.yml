@@ -61,6 +61,7 @@ jobs:
 
       - name: Setup Google Services Configuration
         run: |
+          mkdir -p app/src/main app/src/release
           if [ -n "${{ secrets.GOOGLE_SERVICES_JSON }}" ]; then
             echo "Restoring google-services.json from repository secret GOOGLE_SERVICES_JSON..."
             echo "${{ secrets.GOOGLE_SERVICES_JSON }}" > app/google-services.json
@@ -118,6 +119,10 @@ EOF
           else
             echo "Existing app/google-services.json found."
           fi
+          cp -f app/google-services.json app/src/google-services.json 2>/dev/null || true
+          cp -f app/google-services.json app/src/main/google-services.json 2>/dev/null || true
+          cp -f app/google-services.json app/src/release/google-services.json 2>/dev/null || true
+
 
       - name: Build Release APK
         env:
