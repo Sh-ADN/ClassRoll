@@ -23,68 +23,52 @@ jobs:
         with:
           distribution: temurin
           java-version: '21'
+          cache: gradle
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
 
-      - name: Accept Android SDK Licenses
-        run: yes | sdkmanager --licenses || true
+      - name: Setup Keystore for Signing
+        run: |
+          if [ -n "${{ secrets.KEYSTORE_BASE64 }}" ]; then
+            echo "Decoding repository secret KEYSTORE_BASE64 to my-upload-key.jks..."
+            echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > my-upload-key.jks
+          else
+            echo "No custom keystore secret provided; generating build signing keystore..."
+            keytool -genkeypair -v -keystore debug.keystore -alias androiddebugkey \
+              -keyalg RSA -keysize 2048 -validity 10000 \
+              -storepass android -keypass android \
+              -dname "CN=ClassRoll, OU=App, O=AIStudio, L=City, S=State, C=US"
+          fi
 
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v3
-        with:
-          gradle-version: 9.3.1
+      - name: Build Release APK
+        env:
+          STORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: ./gradlew assembleRelease --stacktrace --no-daemon
 
-      - name: Build release APK
-        run: gradle assembleRelease --stacktrace --no-daemon
-
-      - name: Sign & Prepare APK
-        id: sign_apk
+      - name: Locate & Prepare Release APK
+        id: prepare_apk
         run: |
           mkdir -p release_out
           APK_FILE=$(find app/build/outputs/apk/release -name "*.apk" | head -n 1)
           if [ -z "$APK_FILE" ]; then
-            echo "Error: No release APK found!"
+            echo "Error: No release APK found in app/build/outputs/apk/release!"
             exit 1
           fi
-          echo "Found APK: $APK_FILE"
-
-          if [ -n "${{ secrets.KEYSTORE_BASE64 }}" ]; then
-            echo "Signing with repository secret keystore..."
-            echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > release.keystore
-            KEY_ALIAS="${{ secrets.KEY_ALIAS }}"
-            KEYSTORE_PASS="${{ secrets.KEYSTORE_PASSWORD }}"
-            KEY_PASS="${{ secrets.KEY_PASSWORD }}"
-            jarsigner -verbose -sigalg SHA256withRSA -digestalg SHA-256 \
-              -keystore release.keystore \
-              -storepass "$KEYSTORE_PASS" \
-              -keypass "${KEY_PASS:-$KEYSTORE_PASS}" \
-              "$APK_FILE" "$KEY_ALIAS"
-          else
-            echo "No custom keystore secret provided; generating self-signed keystore for installation..."
-            keytool -genkeypair -v -keystore release.keystore -alias releasekey \
-              -keyalg RSA -keysize 2048 -validity 10000 \
-              -storepass android -keypass android \
-              -dname "CN=ClassRoll, OU=App, O=AIStudio, L=City, S=State, C=US"
-            jarsigner -verbose -sigalg SHA256withRSA -digestalg SHA-256 \
-              -keystore release.keystore \
-              -storepass android \
-              -keypass android \
-              "$APK_FILE" releasekey
-          fi
-
+          echo "Found release APK: $APK_FILE"
           FINAL_APK="release_out/ClassRoll-build-${{ github.run_number }}.apk"
           cp "$APK_FILE" "$FINAL_APK"
-          echo "signed_apk=$FINAL_APK" >> "$GITHUB_OUTPUT"
+          echo "apk_path=$FINAL_APK" >> "$GITHUB_OUTPUT"
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
           name: ClassRoll-APK
-          path: ${{ steps.sign_apk.outputs.signed_apk }}
+          path: ${{ steps.prepare_apk.outputs.apk_path }}
           retention-days: 30
 
-      - name: Set build tag
+      - name: Set Release Tag
         id: vars
         run: echo "tag=build-${{ github.run_number }}" >> "$GITHUB_OUTPUT"
 
@@ -93,8 +77,8 @@ jobs:
         if: startsWith(github.ref, 'refs/heads/main') || github.event_name == 'workflow_dispatch'
         with:
           tag_name: ${{ steps.vars.outputs.tag }}
-          name: "সমাগত খেরোখাতা – build ${{ github.run_number }}"
+          name: "ClassRoll – build ${{ github.run_number }}"
           make_latest: true
-          files: ${{ steps.sign_apk.outputs.signed_apk }}
+          files: ${{ steps.prepare_apk.outputs.apk_path }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
