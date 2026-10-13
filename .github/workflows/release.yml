@@ -30,9 +30,15 @@ jobs:
       - name: Accept Android SDK Licenses
         run: |
           mkdir -p "$ANDROID_HOME/licenses"
-          echo -e "8933902d0775e460b80f4e5a0e283a7d11413d29\nd56f51508286000c7c158107f7948d14e5628597\n60100772780c44369179421288e0c07a1469782f\nf39934297f000e3a3273702c23410b63b156901d\n84831b9409646a918e30573bab4c9c91346d8abd\n504667f4c05772d9a158b1713028d7845763a725\n8e5425713d0c1de0b40e3262f741544aa8495a1a" > "$ANDROID_HOME/licenses/android-sdk-license"
+          echo -e "24333f8a637b3a4e1706d3132e0bf49ab4633632\n8933902d0775e460b80f4e5a0e283a7d11413d29\nd56f51508286000c7c158107f7948d14e5628597\n60100772780c44369179421288e0c07a1469782f\nf39934297f000e3a3273702c23410b63b156901d\n84831b9409646a918e30573bab4c9c91346d8abd\n504667f4c05772d9a158b1713028d7845763a725\n8e5425713d0c1de0b40e3262f741544aa8495a1a" > "$ANDROID_HOME/licenses/android-sdk-license"
           echo -e "84831b9409646a918e30573bab4c9c91346d8abd" > "$ANDROID_HOME/licenses/android-sdk-preview-license"
-          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
+          echo -e "33b622f7cb01413d70a3e6f6a0f45a7424f70401" > "$ANDROID_HOME/licenses/android-googletv-license"
+          echo -e "60100772780c44369179421288e0c07a1469782f" > "$ANDROID_HOME/licenses/android-sdk-arm-dbt-license"
+          echo -e "854734e56d36da5c68057d13e77d9a0b0825305f" > "$ANDROID_HOME/licenses/google-gdk-license"
+          echo -e "e96678292d8ac641b2d23e3ea62341f012b70f00" > "$ANDROID_HOME/licenses/mips-android-sysimage-license"
+          if [ -d "$ANDROID_HOME/cmdline-tools/latest/bin" ]; then
+            yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
+          fi
 
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
@@ -42,8 +48,11 @@ jobs:
           if [ -n "${{ secrets.KEYSTORE_BASE64 }}" ]; then
             echo "Decoding repository secret KEYSTORE_BASE64 to my-upload-key.jks..."
             echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > my-upload-key.jks
+          elif [ -f "debug.keystore.base64" ]; then
+            echo "Decoding debug.keystore.base64 to debug.keystore..."
+            base64 -d debug.keystore.base64 > debug.keystore
           else
-            echo "No custom keystore secret provided; generating build signing keystore..."
+            echo "No custom keystore secret or debug.keystore.base64 provided; generating build signing keystore..."
             keytool -genkeypair -v -keystore debug.keystore -alias androiddebugkey \
               -keyalg RSA -keysize 2048 -validity 10000 \
               -storepass android -keypass android \
