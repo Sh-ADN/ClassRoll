@@ -30,6 +30,9 @@ fun SignInScreen(
     var isLoading by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
 
+    var showDiagnosticsDialog by remember { mutableStateOf(false) }
+    val clipboardManager = androidx.compose.ui.platform.LocalClipboardManager.current
+
     LaunchedEffect(Unit) {
         authManager.attemptAutoSignIn(
             scope = coroutineScope,
@@ -100,18 +103,31 @@ fun SignInScreen(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(32.dp))
+                Spacer(modifier = Modifier.height(24.dp))
 
                 errorMessage?.let { msg ->
-                    Text(
-                        text = msg,
-                        color = MaterialTheme.colorScheme.error,
-                        style = MaterialTheme.typography.bodySmall,
-                        textAlign = TextAlign.Center,
+                    Card(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(bottom = 16.dp)
-                    )
+                            .padding(bottom = 16.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            Text(
+                                text = msg,
+                                color = MaterialTheme.colorScheme.onErrorContainer,
+                                style = MaterialTheme.typography.bodySmall,
+                                textAlign = TextAlign.Start
+                            )
+                            Spacer(modifier = Modifier.height(6.dp))
+                            TextButton(
+                                onClick = { showDiagnosticsDialog = true },
+                                modifier = Modifier.align(Alignment.End)
+                            ) {
+                                Text("View Signing SHA-1 & Fix", style = MaterialTheme.typography.labelMedium)
+                            }
+                        }
+                    }
                 }
 
                 Button(
@@ -137,6 +153,7 @@ fun SignInScreen(
                             },
                             onCancelled = {
                                 isLoading = false
+                                errorMessage = "Sign-in dismissed or interrupted. If you picked your account, the app's signing key SHA-1 fingerprint needs to be added in Firebase Console."
                             }
                         )
                     },
@@ -163,8 +180,75 @@ fun SignInScreen(
                         Text("Sign in with Google", style = MaterialTheme.typography.titleMedium)
                     }
                 }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                TextButton(
+                    onClick = { showDiagnosticsDialog = true },
+                    modifier = Modifier.testTag("diagnostics_button")
+                ) {
+                    Text(
+                        text = "Trouble signing in? View SHA-1 Certificate",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.outline
+                    )
+                }
             }
         }
+    }
+
+    if (showDiagnosticsDialog) {
+        val currentSha1 = com.aistudio.classroll.jkmxlp.util.SigningUtils.getSha1Fingerprint(context)
+        val currentSha256 = com.aistudio.classroll.jkmxlp.util.SigningUtils.getSha256Fingerprint(context)
+        AlertDialog(
+            onDismissRequest = { showDiagnosticsDialog = false },
+            title = { Text("Google Sign-In Setup") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        text = "Google Sign-In requires your signing key's SHA-1 fingerprint to be registered in your Firebase Console project.",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    Divider()
+                    Text(
+                        text = "Package Name:\n${context.packageName}",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        text = "Installed APK SHA-1:\n$currentSha1",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Text(
+                        text = "Installed APK SHA-256:\n$currentSha256",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    Divider()
+                    Text(
+                        text = "How to fix in 1 minute:\n1. Copy the SHA-1 below.\n2. Open Firebase Console -> Project Settings -> General -> Your Android App.\n3. Click 'Add fingerprint' and paste it.\n4. Sign-in works immediately without rebuilding!",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        clipboardManager.setText(androidx.compose.ui.text.AnnotatedString(currentSha1))
+                        android.widget.Toast.makeText(context, "SHA-1 copied to clipboard", android.widget.Toast.LENGTH_SHORT).show()
+                    }
+                ) {
+                    Text("Copy SHA-1")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDiagnosticsDialog = false }) {
+                    Text("Close")
+                }
+            }
+        )
     }
 }
 

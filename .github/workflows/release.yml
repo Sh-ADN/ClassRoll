@@ -70,6 +70,13 @@ jobs:
               -dname "CN=ClassRoll, OU=App, O=AIStudio, L=City, ST=State, C=US"
           fi
 
+          echo "=== RELEASE SIGNING KEY FINGERPRINTS ==="
+          if [ -f "my-upload-key.jks" ]; then
+            keytool -list -v -keystore my-upload-key.jks -storepass "$STORE_PASSWORD" 2>/dev/null | grep -E "SHA1:|SHA256:" || true
+          elif [ -f "debug.keystore" ]; then
+            keytool -list -v -keystore debug.keystore -storepass android 2>/dev/null | grep -E "SHA1:|SHA256:" || true
+          fi
+
       # settings.gradle.kts and app/build.gradle.kts already create a default
       # google-services.json automatically when none exists, so no inline JSON
       # is needed here. This step only restores a real one if you provide it

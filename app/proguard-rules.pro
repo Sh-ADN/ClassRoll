@@ -41,3 +41,11 @@
 # Optimize Compose UI runtime
 -dontwarn androidx.compose.**
 
+# Jetpack Credential Manager & Google Identity Services
+-keep class androidx.credentials.** { *; }
+-keep class com.google.android.libraries.identity.googleid.** { *; }
+-keep class com.google.android.gms.auth.api.signin.** { *; }
+-keep class com.google.firebase.auth.** { *; }
+-dontwarn androidx.credentials.**
+-dontwarn com.google.android.libraries.identity.googleid.**
+
