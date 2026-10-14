@@ -29,8 +29,9 @@ class FirestoreRepository(private val db: FirebaseFirestore) {
             ?: throw IllegalStateException("User must be signed in with Google before accessing Firestore.")
     }
 
-    private fun studentDocId(year: String, roll: String): String = "${year}_$roll"
-    private fun attendanceDocId(year: String, date: String, roll: String): String = "${year}_${date}_$roll"
+    private fun sanitizeKey(key: String): String = key.replace("/", "_").replace(" ", "").trim()
+    private fun studentDocId(year: String, roll: String): String = "${sanitizeKey(year)}_${sanitizeKey(roll)}"
+    private fun attendanceDocId(year: String, date: String, roll: String): String = "${sanitizeKey(year)}_${sanitizeKey(date)}_${sanitizeKey(roll)}"
 
     fun observeStudents(year: String): Flow<List<FirestoreStudent>> = flow {
         val uid = requireUserId()
@@ -51,13 +52,17 @@ class FirestoreRepository(private val db: FirebaseFirestore) {
 
     suspend fun saveStudent(student: StudentEntity) {
         val uid = requireUserId()
-        val docId = studentDocId(student.year, student.roll)
+        val normYear = student.year.trim().ifBlank {
+            java.text.SimpleDateFormat("yyyy", java.util.Locale.US).format(java.util.Date())
+        }
+        val normRoll = student.roll.trim()
+        val docId = studentDocId(normYear, normRoll)
         val docRef = db.collection("users").document(uid).collection("students").document(docId)
         val data = hashMapOf(
             "userId" to uid,
-            "year" to student.year,
-            "roll" to student.roll,
-            "name" to student.name,
+            "year" to normYear,
+            "roll" to normRoll,
+            "name" to student.name.trim(),
             "active" to student.active,
             "updatedAt" to FieldValue.serverTimestamp()
         )
@@ -87,14 +92,24 @@ class FirestoreRepository(private val db: FirebaseFirestore) {
 
     suspend fun saveAttendanceRecord(record: AttendanceRecordEntity) {
         val uid = requireUserId()
-        val docId = attendanceDocId(record.year, record.date, record.roll)
+        val normYear = record.year.trim().ifBlank {
+            java.text.SimpleDateFormat("yyyy", java.util.Locale.US).format(java.util.Date())
+        }
+        val normDate = record.date.trim()
+        val normRoll = record.roll.trim()
+        val normStatus = when (record.status.trim().uppercase()) {
+            "PRESENT", "P" -> "P"
+            "ABSENT", "A" -> "A"
+            else -> record.status.trim().ifBlank { "P" }
+        }
+        val docId = attendanceDocId(normYear, normDate, normRoll)
         val docRef = db.collection("users").document(uid).collection("attendance").document(docId)
         val data = hashMapOf(
             "userId" to uid,
-            "year" to record.year,
-            "date" to record.date,
-            "roll" to record.roll,
-            "status" to record.status,
+            "year" to normYear,
+            "date" to normDate,
+            "roll" to normRoll,
+            "status" to normStatus,
             "updatedAt" to FieldValue.serverTimestamp()
         )
         try {
@@ -143,11 +158,36 @@ class FirestoreRepository(private val db: FirebaseFirestore) {
         }
     }
 
+    suspend fun saveUserSettings(academicYear: String, appTheme: String) {
+        try {
+            val uid = requireUserId()
+            val docRef = db.collection("users").document(uid).collection("settings").document("user_config")
+            val data = hashMapOf(
+                "userId" to uid,
+                "academicYear" to academicYear.trim(),
+                "appTheme" to appTheme.trim(),
+                "updatedAt" to FieldValue.serverTimestamp()
+            )
+            docRef.set(data).await()
+        } catch (e: Exception) {
+            // Ignore settings sync failure
+        }
+    }
+
     suspend fun syncLocalToCloud(
         students: List<StudentEntity>,
-        attendance: List<AttendanceRecordEntity>
+        attendance: List<AttendanceRecordEntity>,
+        academicYear: String = "",
+        appTheme: String = "SYSTEM"
     ) {
         val uid = requireUserId()
+        val defaultYear = academicYear.ifBlank {
+            java.text.SimpleDateFormat("yyyy", java.util.Locale.US).format(java.util.Date())
+        }
+
+        // Save user settings so academic year survives data clearing
+        saveUserSettings(defaultYear, appTheme)
+
         val studentsCol = db.collection("users").document(uid).collection("students")
         val attendanceCol = db.collection("users").document(uid).collection("attendance")
 
@@ -155,14 +195,16 @@ class FirestoreRepository(private val db: FirebaseFirestore) {
         students.chunked(450).forEach { chunk ->
             val batch = db.batch()
             chunk.forEach { student ->
-                val doc = studentsCol.document(studentDocId(student.year, student.roll))
+                val y = student.year.trim().ifBlank { defaultYear }
+                val r = student.roll.trim()
+                val doc = studentsCol.document(studentDocId(y, r))
                 batch.set(
                     doc,
                     hashMapOf(
                         "userId" to uid,
-                        "year" to student.year,
-                        "roll" to student.roll,
-                        "name" to student.name,
+                        "year" to y,
+                        "roll" to r,
+                        "name" to student.name.trim(),
                         "active" to student.active,
                         "updatedAt" to FieldValue.serverTimestamp()
                     )
@@ -175,15 +217,23 @@ class FirestoreRepository(private val db: FirebaseFirestore) {
         attendance.chunked(450).forEach { chunk ->
             val batch = db.batch()
             chunk.forEach { record ->
-                val doc = attendanceCol.document(attendanceDocId(record.year, record.date, record.roll))
+                val y = record.year.trim().ifBlank { defaultYear }
+                val d = record.date.trim()
+                val r = record.roll.trim()
+                val s = when (record.status.trim().uppercase()) {
+                    "PRESENT", "P" -> "P"
+                    "ABSENT", "A" -> "A"
+                    else -> record.status.trim().ifBlank { "P" }
+                }
+                val doc = attendanceCol.document(attendanceDocId(y, d, r))
                 batch.set(
                     doc,
                     hashMapOf(
                         "userId" to uid,
-                        "year" to record.year,
-                        "date" to record.date,
-                        "roll" to record.roll,
-                        "status" to record.status,
+                        "year" to y,
+                        "date" to d,
+                        "roll" to r,
+                        "status" to s,
                         "updatedAt" to FieldValue.serverTimestamp()
                     )
                 )
@@ -192,29 +242,46 @@ class FirestoreRepository(private val db: FirebaseFirestore) {
         }
     }
 
-    suspend fun pullCloudToLocal(): Pair<List<StudentEntity>, List<AttendanceRecordEntity>> {
+    suspend fun pullCloudToLocal(): Triple<List<StudentEntity>, List<AttendanceRecordEntity>, String?> {
         val uid = requireUserId()
         val studentsCol = db.collection("users").document(uid).collection("students")
         val attendanceCol = db.collection("users").document(uid).collection("attendance")
+        val settingsDoc = db.collection("users").document(uid).collection("settings").document("user_config")
+
+        val cloudYear: String? = try {
+            val settingsSnap = settingsDoc.get().await()
+            settingsSnap.getString("academicYear")?.takeIf { it.isNotBlank() }
+        } catch (e: Exception) {
+            null
+        }
 
         val studentsSnapshot = studentsCol.get().await()
         val students = studentsSnapshot.documents.mapNotNull { doc ->
-            val y = doc.getString("year") ?: return@mapNotNull null
-            val r = doc.getString("roll") ?: return@mapNotNull null
-            val n = doc.getString("name") ?: ""
+            val docIdParts = doc.id.split("_")
+            val y = (doc.get("year") ?: if (docIdParts.size >= 2) docIdParts[0] else null)?.toString()?.trim()
+            val r = (doc.get("roll") ?: if (docIdParts.size >= 2) docIdParts[1] else null)?.toString()?.trim()
+            if (y.isNullOrBlank() || r.isNullOrBlank()) return@mapNotNull null
+            val n = doc.getString("name") ?: doc.get("name")?.toString() ?: ""
             val a = doc.getBoolean("active") ?: true
             StudentEntity(year = y, roll = r, name = n, active = a)
         }
 
         val attendanceSnapshot = attendanceCol.get().await()
         val records = attendanceSnapshot.documents.mapNotNull { doc ->
-            val y = doc.getString("year") ?: return@mapNotNull null
-            val d = doc.getString("date") ?: return@mapNotNull null
-            val r = doc.getString("roll") ?: return@mapNotNull null
-            val s = doc.getString("status") ?: return@mapNotNull null
+            val docIdParts = doc.id.split("_")
+            val y = (doc.get("year") ?: if (docIdParts.size >= 3) docIdParts[0] else null)?.toString()?.trim()
+            val d = (doc.get("date") ?: if (docIdParts.size >= 3) docIdParts[1] else null)?.toString()?.trim()
+            val r = (doc.get("roll") ?: if (docIdParts.size >= 3) docIdParts[2] else null)?.toString()?.trim()
+            if (y.isNullOrBlank() || d.isNullOrBlank() || r.isNullOrBlank()) return@mapNotNull null
+            val rawStatus = (doc.get("status") ?: "P").toString().trim()
+            val s = when (rawStatus.uppercase()) {
+                "PRESENT", "P" -> "P"
+                "ABSENT", "A" -> "A"
+                else -> rawStatus.ifBlank { "P" }
+            }
             AttendanceRecordEntity(year = y, date = d, roll = r, status = s, isSynced = true)
         }
 
-        return Pair(students, records)
+        return Triple(students, records, cloudYear)
     }
 }

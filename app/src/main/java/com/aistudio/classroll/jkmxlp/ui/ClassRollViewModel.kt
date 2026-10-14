@@ -235,8 +235,13 @@ class ClassRollViewModel(application: Application) : AndroidViewModel(applicatio
             try {
                 val students = repository.getAllStudentsAllYears()
                 val records = repository.getAllAttendanceAllYears()
-                firestoreRepo.syncLocalToCloud(students, records)
-                onComplete(true, "Successfully backed up ${students.size} students and ${records.size} attendance records to Cloud Firestore!")
+                val activeYear = currentYear.value.ifBlank {
+                    students.firstOrNull { it.year.isNotBlank() }?.year
+                        ?: records.firstOrNull { it.year.isNotBlank() }?.year
+                        ?: SimpleDateFormat("yyyy", Locale.US).format(Date())
+                }
+                firestoreRepo.syncLocalToCloud(students, records, activeYear, appTheme.value)
+                onComplete(true, "Successfully backed up ${students.size} students and ${records.size} attendance records for academic year $activeYear to Cloud Firestore!")
             } catch (e: Exception) {
                 onComplete(false, e.localizedMessage ?: "Failed to sync to cloud")
             } finally {
@@ -249,10 +254,25 @@ class ClassRollViewModel(application: Application) : AndroidViewModel(applicatio
         viewModelScope.launch {
             _isCloudSyncing.value = true
             try {
-                val (students, records) = firestoreRepo.pullCloudToLocal()
+                val (students, records, cloudYear) = firestoreRepo.pullCloudToLocal()
                 repository.restoreBackupData(students, records)
+
+                // Automatically restore the academic year so the UI immediately shows the records
+                val targetYear = when {
+                    !cloudYear.isNullOrBlank() -> cloudYear
+                    students.any { it.year.isNotBlank() } -> students.first { it.year.isNotBlank() }.year
+                    records.any { it.year.isNotBlank() } -> records.first { it.year.isNotBlank() }.year
+                    currentYear.value.isNotBlank() -> currentYear.value
+                    else -> SimpleDateFormat("yyyy", Locale.US).format(Date())
+                }
+                settingsRepo.updateAcademicYear(targetYear)
                 loadAvailableYears()
-                onComplete(true, "Successfully restored ${students.size} students and ${records.size} attendance records from Cloud Firestore!")
+
+                if (records.isEmpty() && students.isNotEmpty()) {
+                    onComplete(true, "Restored ${students.size} students for year $targetYear. (Note: No cloud attendance records were found on this account yet. Tap 'Backup to Cloud' after taking attendance to save them).")
+                } else {
+                    onComplete(true, "Successfully restored ${students.size} students and ${records.size} attendance records for academic year $targetYear from Cloud Firestore!")
+                }
             } catch (e: Exception) {
                 onComplete(false, e.localizedMessage ?: "Failed to restore from cloud")
             } finally {
@@ -287,6 +307,7 @@ class ClassRollViewModel(application: Application) : AndroidViewModel(applicatio
 
                 val jsonRoot = JSONObject()
                 jsonRoot.put("version", 1)
+                jsonRoot.put("academicYear", currentYear.value)
                 jsonRoot.put("exportedAt", System.currentTimeMillis())
 
                 val studentsArray = JSONArray()
@@ -323,38 +344,59 @@ class ClassRollViewModel(application: Application) : AndroidViewModel(applicatio
         viewModelScope.launch {
             try {
                 val jsonRoot = JSONObject(jsonString)
-                val studentsArray = jsonRoot.getJSONArray("students")
-                val recordsArray = jsonRoot.getJSONArray("attendanceRecords")
+                val explicitYear = jsonRoot.optString("academicYear", "")
+
+                val studentsArray = jsonRoot.optJSONArray("students") ?: JSONArray()
+                val recordsArray = jsonRoot.optJSONArray("attendanceRecords") 
+                    ?: jsonRoot.optJSONArray("attendance") 
+                    ?: jsonRoot.optJSONArray("records") 
+                    ?: JSONArray()
 
                 val students = mutableListOf<StudentEntity>()
                 for (i in 0 until studentsArray.length()) {
-                    val sObj = studentsArray.getJSONObject(i)
-                    students.add(
-                        StudentEntity(
-                            year = sObj.getString("year"),
-                            roll = sObj.getString("roll"),
-                            name = sObj.optString("name", ""),
-                            active = sObj.optBoolean("active", true)
-                        )
-                    )
+                    val sObj = studentsArray.optJSONObject(i) ?: continue
+                    val y = sObj.optString("year", explicitYear).ifBlank {
+                        explicitYear.ifBlank { SimpleDateFormat("yyyy", Locale.US).format(Date()) }
+                    }
+                    val r = (sObj.opt("roll") ?: "").toString().trim()
+                    if (r.isBlank()) continue
+                    val n = sObj.optString("name", "")
+                    val a = sObj.optBoolean("active", true)
+                    students.add(StudentEntity(year = y, roll = r, name = n, active = a))
                 }
 
                 val records = mutableListOf<AttendanceRecordEntity>()
                 for (i in 0 until recordsArray.length()) {
-                    val rObj = recordsArray.getJSONObject(i)
-                    records.add(
-                        AttendanceRecordEntity(
-                            year = rObj.getString("year"),
-                            date = rObj.getString("date"),
-                            roll = rObj.getString("roll"),
-                            status = rObj.getString("status"),
-                            isSynced = true
-                        )
-                    )
+                    val rObj = recordsArray.optJSONObject(i) ?: continue
+                    val y = rObj.optString("year", explicitYear).ifBlank {
+                        explicitYear.ifBlank { SimpleDateFormat("yyyy", Locale.US).format(Date()) }
+                    }
+                    val d = rObj.optString("date", "").trim()
+                    val r = (rObj.opt("roll") ?: "").toString().trim()
+                    val rawStatus = (rObj.opt("status") ?: "P").toString().trim()
+                    val s = when (rawStatus.uppercase()) {
+                        "PRESENT", "P" -> "P"
+                        "ABSENT", "A" -> "A"
+                        else -> rawStatus.ifBlank { "P" }
+                    }
+                    if (d.isNotBlank() && r.isNotBlank()) {
+                        records.add(AttendanceRecordEntity(year = y, date = d, roll = r, status = s, isSynced = true))
+                    }
                 }
 
                 repository.restoreBackupData(students, records)
-                onResult(true, "Restored ${students.size} students and ${records.size} attendance records successfully.")
+
+                val targetYear = when {
+                    explicitYear.isNotBlank() -> explicitYear
+                    students.any { it.year.isNotBlank() } -> students.first { it.year.isNotBlank() }.year
+                    records.any { it.year.isNotBlank() } -> records.first { it.year.isNotBlank() }.year
+                    currentYear.value.isNotBlank() -> currentYear.value
+                    else -> SimpleDateFormat("yyyy", Locale.US).format(Date())
+                }
+                settingsRepo.updateAcademicYear(targetYear)
+                loadAvailableYears()
+
+                onResult(true, "Restored ${students.size} students and ${records.size} attendance records for academic year $targetYear successfully.")
             } catch (e: Exception) {
                 e.printStackTrace()
                 onResult(false, "Failed to parse backup JSON: ${e.message}")

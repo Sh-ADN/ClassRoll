@@ -329,6 +329,28 @@ fun SettingsScreen(
                     }
                 }
 
+                if (statusMessage.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Surface(
+                        shape = MaterialTheme.shapes.small,
+                        color = if (statusMessage.contains("fail", ignoreCase = true) || statusMessage.contains("error", ignoreCase = true))
+                            MaterialTheme.colorScheme.errorContainer
+                        else
+                            MaterialTheme.colorScheme.secondaryContainer,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = statusMessage,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (statusMessage.contains("fail", ignoreCase = true) || statusMessage.contains("error", ignoreCase = true))
+                                MaterialTheme.colorScheme.onErrorContainer
+                            else
+                                MaterialTheme.colorScheme.onSecondaryContainer,
+                            modifier = Modifier.padding(8.dp)
+                        )
+                    }
+                }
+
                 authManager?.let { auth ->
                     Spacer(modifier = Modifier.height(8.dp))
                     OutlinedButton(

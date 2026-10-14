@@ -36,7 +36,12 @@ class SettingsRepository(private val context: Context) {
     }
 
     val academicYearFlow: Flow<String> = context.dataStore.data.map { preferences ->
-        preferences[ACADEMIC_YEAR] ?: ""
+        val stored = preferences[ACADEMIC_YEAR]
+        if (!stored.isNullOrBlank()) {
+            stored
+        } else {
+            java.text.SimpleDateFormat("yyyy", java.util.Locale.US).format(java.util.Date())
+        }
     }
 
     val appsScriptTokenFlow: Flow<String> = context.dataStore.data.map {
