@@ -51,17 +51,29 @@ class AttendanceReminderWorker(
         val year = settingsRepo.academicYearFlow.first()
         val today = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
 
-        if (year.isNotBlank()) {
-            val db = Room.databaseBuilder(applicationContext, AppDatabase::class.java, "classroll_db")
-                .fallbackToDestructiveMigration()
-                .build()
+        // No reminder on weekends (Friday and Saturday, as in the rest of the app)
+        // or on days you have marked as a holiday.
+        val dayOfWeek = Calendar.getInstance().get(Calendar.DAY_OF_WEEK)
+        val isWeekend = dayOfWeek == Calendar.FRIDAY || dayOfWeek == Calendar.SATURDAY
+        val isHoliday = settingsRepo.holidaysFlow.first().contains(today)
+
+        if (year.isNotBlank() && !isWeekend && !isHoliday) {
             try {
-                val count = db.classRollDao().countAttendanceForDate(year, today)
-                if (count == 0) {
-                    showNotification()
+                // No destructive-migration fallback here: a background job must never
+                // be able to wipe the database if the schema ever changes.
+                val db = Room.databaseBuilder(applicationContext, AppDatabase::class.java, "classroll_db")
+                    .build()
+                try {
+                    val count = db.classRollDao().countAttendanceForDate(year, today)
+                    if (count == 0) {
+                        showNotification()
+                    }
+                } finally {
+                    db.close()
                 }
-            } finally {
-                db.close()
+            } catch (e: Exception) {
+                // Could not read the data this time. Skip today's reminder, but keep
+                // the daily schedule going (below) instead of stopping it for good.
             }
         }
 

@@ -2,12 +2,16 @@ package com.aistudio.classroll.jkmxlp.data
 
 import android.content.Context
 import com.aistudio.classroll.jkmxlp.R
+import com.google.android.gms.tasks.Task
 import com.google.firebase.Firebase
 import com.google.firebase.auth.auth
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.SetOptions
 import com.google.firebase.firestore.snapshots
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.flow
@@ -122,6 +126,52 @@ class FirestoreRepository(private val db: FirebaseFirestore) {
         }
     }
 
+    // Saves a whole group of attendance records at once (e.g. "Mark All Present")
+    // using batched writes. Previously this was one awaited write per student,
+    // one after another, which is slow and hangs while offline.
+    suspend fun saveAttendanceBatch(records: List<AttendanceRecordEntity>) {
+        val valid = records.filter { it.roll.isNotBlank() && it.date.isNotBlank() }
+        if (valid.isEmpty()) return
+        val uid = requireUserId()
+        val attendanceCol = db.collection("users").document(uid).collection("attendance")
+        val tasks = mutableListOf<Task<Void>>()
+        valid.chunked(450).forEach { chunk ->
+            val batch = db.batch()
+            chunk.forEach { record ->
+                val y = record.year.trim().ifBlank {
+                    java.text.SimpleDateFormat("yyyy", java.util.Locale.US).format(java.util.Date())
+                }
+                val d = record.date.trim()
+                val r = record.roll.trim()
+                val st = when (record.status.trim().uppercase()) {
+                    "PRESENT", "P" -> "P"
+                    "ABSENT", "A" -> "A"
+                    else -> record.status.trim().ifBlank { "P" }
+                }
+                batch.set(
+                    attendanceCol.document(attendanceDocId(y, d, r)),
+                    hashMapOf(
+                        "userId" to uid,
+                        "year" to y,
+                        "date" to d,
+                        "roll" to r,
+                        "status" to st,
+                        "updatedAt" to FieldValue.serverTimestamp()
+                    )
+                )
+            }
+            tasks.add(batch.commit())
+        }
+        try {
+            tasks.forEach { it.await() }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.WRITE, attendanceCol.path)
+            throw e
+        }
+    }
+
     suspend fun deleteAttendanceRecord(year: String, date: String, roll: String) {
         val uid = requireUserId()
         val docId = attendanceDocId(year, date, roll)
@@ -158,19 +208,40 @@ class FirestoreRepository(private val db: FirebaseFirestore) {
         }
     }
 
-    suspend fun saveUserSettings(academicYear: String, appTheme: String) {
+    suspend fun saveUserSettings(academicYear: String, appTheme: String, holidays: Set<String>? = null) {
         try {
             val uid = requireUserId()
             val docRef = db.collection("users").document(uid).collection("settings").document("user_config")
-            val data = hashMapOf(
+            val data = hashMapOf<String, Any>(
                 "userId" to uid,
                 "academicYear" to academicYear.trim(),
                 "appTheme" to appTheme.trim(),
                 "updatedAt" to FieldValue.serverTimestamp()
             )
-            docRef.set(data).await()
+            if (holidays != null) {
+                data["holidays"] = holidays.sorted()
+            }
+            // merge, so a call that does not include holidays never erases them
+            docRef.set(data, SetOptions.merge()).await()
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             // Ignore settings sync failure
+        }
+    }
+
+    // Returns the holiday list stored in the cloud, or null if the cloud copy
+    // has none (so a restore never wipes local holidays with "nothing").
+    suspend fun pullHolidays(): Set<String>? {
+        val uid = requireUserId()
+        return try {
+            val snap = db.collection("users").document(uid)
+                .collection("settings").document("user_config").get().await()
+            (snap.get("holidays") as? List<*>)?.mapNotNull { it?.toString() }?.toSet()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            null
         }
     }
 
@@ -178,21 +249,32 @@ class FirestoreRepository(private val db: FirebaseFirestore) {
         students: List<StudentEntity>,
         attendance: List<AttendanceRecordEntity>,
         academicYear: String = "",
-        appTheme: String = "SYSTEM"
+        appTheme: String = "SYSTEM",
+        holidays: Set<String>? = null,
+        onProgress: (done: Int, total: Int) -> Unit = { _, _ -> }
     ) {
         val uid = requireUserId()
         val defaultYear = academicYear.ifBlank {
             java.text.SimpleDateFormat("yyyy", java.util.Locale.US).format(java.util.Date())
         }
 
-        // Save user settings so academic year survives data clearing
-        saveUserSettings(defaultYear, appTheme)
+        // Save user settings so academic year and holidays survive data clearing
+        saveUserSettings(defaultYear, appTheme, holidays)
 
         val studentsCol = db.collection("users").document(uid).collection("students")
         val attendanceCol = db.collection("users").document(uid).collection("attendance")
 
-        // Batch write students
-        students.chunked(450).forEach { chunk ->
+        // Skip rows the security rules would reject anyway. A single rejected
+        // row makes Firestore reject its whole batch of up to 450 records.
+        val validStudents = students.filter { it.roll.isNotBlank() && it.name.isNotBlank() }
+        val validAttendance = attendance.filter { it.roll.isNotBlank() && it.date.isNotBlank() }
+
+        // Queue every batch first and only then wait for them. The Firestore SDK
+        // pipelines queued batches over one connection, so this avoids paying a
+        // full network round-trip for each group of 450 records, one after another.
+        val pending = mutableListOf<Task<Void>>()
+
+        validStudents.chunked(450).forEach { chunk ->
             val batch = db.batch()
             chunk.forEach { student ->
                 val y = student.year.trim().ifBlank { defaultYear }
@@ -210,11 +292,10 @@ class FirestoreRepository(private val db: FirebaseFirestore) {
                     )
                 )
             }
-            batch.commit().await()
+            pending.add(batch.commit())
         }
 
-        // Batch write attendance
-        attendance.chunked(450).forEach { chunk ->
+        validAttendance.chunked(450).forEach { chunk ->
             val batch = db.batch()
             chunk.forEach { record ->
                 val y = record.year.trim().ifBlank { defaultYear }
@@ -238,7 +319,14 @@ class FirestoreRepository(private val db: FirebaseFirestore) {
                     )
                 )
             }
-            batch.commit().await()
+            pending.add(batch.commit())
+        }
+
+        val total = pending.size
+        onProgress(0, total)
+        pending.forEachIndexed { index, task ->
+            task.await()
+            onProgress(index + 1, total)
         }
     }
 
@@ -248,14 +336,23 @@ class FirestoreRepository(private val db: FirebaseFirestore) {
         val attendanceCol = db.collection("users").document(uid).collection("attendance")
         val settingsDoc = db.collection("users").document(uid).collection("settings").document("user_config")
 
-        val cloudYear: String? = try {
-            val settingsSnap = settingsDoc.get().await()
-            settingsSnap.getString("academicYear")?.takeIf { it.isNotBlank() }
-        } catch (e: Exception) {
-            null
+        // Fetch settings, students and attendance at the same time instead of
+        // three network round-trips one after another.
+        val (cloudYear, studentsSnapshot, attendanceSnapshot) = coroutineScope {
+            val settingsJob = async {
+                try {
+                    settingsDoc.get().await().getString("academicYear")?.takeIf { it.isNotBlank() }
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    null
+                }
+            }
+            val studentsJob = async { studentsCol.get().await() }
+            val attendanceJob = async { attendanceCol.get().await() }
+            Triple(settingsJob.await(), studentsJob.await(), attendanceJob.await())
         }
 
-        val studentsSnapshot = studentsCol.get().await()
         val students = studentsSnapshot.documents.mapNotNull { doc ->
             val docIdParts = doc.id.split("_")
             val y = (doc.get("year") ?: if (docIdParts.size >= 2) docIdParts[0] else null)?.toString()?.trim()
@@ -266,7 +363,6 @@ class FirestoreRepository(private val db: FirebaseFirestore) {
             StudentEntity(year = y, roll = r, name = n, active = a)
         }
 
-        val attendanceSnapshot = attendanceCol.get().await()
         val records = attendanceSnapshot.documents.mapNotNull { doc ->
             val docIdParts = doc.id.split("_")
             val y = (doc.get("year") ?: if (docIdParts.size >= 3) docIdParts[0] else null)?.toString()?.trim()

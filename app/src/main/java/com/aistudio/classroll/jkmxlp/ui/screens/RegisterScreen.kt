@@ -103,13 +103,18 @@ fun RegisterScreen(viewModel: ClassRollViewModel) {
     var copyMessage by remember { mutableStateOf("") }
     val context = LocalContext.current
     var pendingCsvContent by remember { mutableStateOf("") }
+    // Days after today have not happened yet, so they must not count as working days.
+    val todayStr = remember { SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date()) }
     val saveCsvLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("text/csv")
     ) { uri ->
         if (uri != null && pendingCsvContent.isNotBlank()) {
             try {
                 context.contentResolver.openOutputStream(uri)?.use { out ->
-                    out.write(pendingCsvContent.toByteArray())
+                    // UTF-8 byte-order mark: without it Excel on Windows shows Bengali
+                    // (and other non-English) names as garbled characters.
+                    out.write(byteArrayOf(0xEF.toByte(), 0xBB.toByte(), 0xBF.toByte()))
+                    out.write(pendingCsvContent.toByteArray(Charsets.UTF_8))
                 }
                 copyMessage = "Saved to file."
             } catch (e: Exception) {
@@ -506,7 +511,7 @@ fun RegisterScreen(viewModel: ClassRollViewModel) {
                                             val attValues = dates.joinToString(",") { date ->
                                                 attendanceMap[student.roll]?.get(date)?.status ?: ""
                                             }
-                                            "${student.roll},\"${student.name}\",$attValues"
+                                            "${student.roll},\"${student.name.replace("\"", "\"\"")}\",$attValues"
                                         }
                                         val csvContent = (listOf(header) + rows).joinToString("\n")
                                         pendingCsvContent = csvContent
@@ -517,13 +522,13 @@ fun RegisterScreen(viewModel: ClassRollViewModel) {
                                     text = { Text("Download Summary Report (CSV)") },
                                     onClick = {
                                         showExportMenu = false
-                                        val workingDays = dates.count { !isWeekend(it) && !holidays.contains(it) }
+                                        val workingDays = dates.count { !isWeekend(it) && !holidays.contains(it) && it <= todayStr }
                                         val header = "Roll,Name,Present,Absent,Percentage\n"
                                         val rows = filteredStudents.joinToString("\n") { student ->
                                             val present = dates.count { attendanceMap[student.roll]?.get(it)?.status == "P" }
                                             val absent = dates.count { attendanceMap[student.roll]?.get(it)?.status == "A" }
-                                            val pct = if (workingDays > 0) (present * 100) / workingDays else 0
-                                            "${student.roll},\"${student.name}\",$present,$absent,$pct%"
+                                            val pct = if (workingDays > 0) Math.round(present * 100f / workingDays) else 0
+                                            "${student.roll},\"${student.name.replace("\"", "\"\"")}\",$present,$absent,$pct%"
                                         }
                                         pendingCsvContent = header + rows
                                         saveCsvLauncher.launch("summary_${selectedMonthStr}.csv")
@@ -890,7 +895,8 @@ private fun generateSummaryPdf(
 
     paint.isFakeBoldText = false
     var y = 130f
-    val workingDays = dates.count { !isWeekend(it) && !holidays.contains(it) }
+    val todayStr = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
+    val workingDays = dates.count { !isWeekend(it) && !holidays.contains(it) && it <= todayStr }
 
     var pageNumber = 1
     for (student in students) {
@@ -904,7 +910,7 @@ private fun generateSummaryPdf(
         }
         val present = dates.count { attendanceMap[student.roll]?.get(it)?.status == "P" }
         val absent = dates.count { attendanceMap[student.roll]?.get(it)?.status == "A" }
-        val pct = if (workingDays > 0) (present * 100) / workingDays else 0
+        val pct = if (workingDays > 0) Math.round(present * 100f / workingDays) else 0
 
         canvas.drawText(student.roll, 50f, y, paint)
         canvas.drawText(student.name, 120f, y, paint)

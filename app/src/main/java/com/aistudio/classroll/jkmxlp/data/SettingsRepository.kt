@@ -25,14 +25,17 @@ class SettingsRepository(private val context: Context) {
         val REMINDER_ENABLED = booleanPreferencesKey("reminder_enabled")
         val REMINDER_TIME = stringPreferencesKey("reminder_time") // "HH:mm", 24h
         val CUSTOM_HOLIDAYS = stringSetPreferencesKey("custom_holidays")
+        val OFFLINE_MODE = booleanPreferencesKey("offline_mode")
     }
 
     val appThemeFlow: Flow<String> = context.dataStore.data.map { preferences ->
         preferences[APP_THEME] ?: "SYSTEM"
     }
 
-    val webAppUrlFlow: Flow<String> = context.dataStore.data.map {
-        "https://script.google.com/macros/s/AKfycbzTDiNJh4LEaIah19SVFaf6JlESbW5tf2ElwaMULTDENIAlXFOFI4QAXEmV1nYwrVdA/exec"
+    // The old Google Sheets / Apps Script sync is no longer used. The URL that used
+    // to be hardcoded here has been removed so it is not stored in the repository.
+    val webAppUrlFlow: Flow<String> = context.dataStore.data.map { preferences ->
+        preferences[WEB_APP_URL] ?: ""
     }
 
     val academicYearFlow: Flow<String> = context.dataStore.data.map { preferences ->
@@ -44,8 +47,8 @@ class SettingsRepository(private val context: Context) {
         }
     }
 
-    val appsScriptTokenFlow: Flow<String> = context.dataStore.data.map {
-        "Q8tZ2nLm5vX9aH1kPc4RrW7yNd3Fs6UbJe0MgKt8Vx2ApCn9YqLh5Di7SwBuE4oNz"
+    val appsScriptTokenFlow: Flow<String> = context.dataStore.data.map { preferences ->
+        preferences[APPS_SCRIPT_TOKEN] ?: ""
     }
 
     // NEW: when the last successful backup happened (epoch millis, 0 = never)
@@ -66,6 +69,11 @@ class SettingsRepository(private val context: Context) {
     // NEW: set of custom holiday date strings ("yyyy-MM-dd")
     val holidaysFlow: Flow<Set<String>> = context.dataStore.data.map { preferences ->
         preferences[CUSTOM_HOLIDAYS] ?: emptySet()
+    }
+
+    // True when the user chose to use the app without signing in with Google.
+    val offlineModeFlow: Flow<Boolean> = context.dataStore.data.map { preferences ->
+        preferences[OFFLINE_MODE] ?: false
     }
 
     suspend fun updateWebAppUrl(url: String) {
@@ -119,6 +127,19 @@ class SettingsRepository(private val context: Context) {
             } else {
                 preferences[CUSTOM_HOLIDAYS] = current + date
             }
+        }
+    }
+
+    suspend fun updateOfflineMode(enabled: Boolean) {
+        context.dataStore.edit { preferences ->
+            preferences[OFFLINE_MODE] = enabled
+        }
+    }
+
+    // Replaces the whole holiday list (used when restoring from a backup).
+    suspend fun setHolidays(dates: Set<String>) {
+        context.dataStore.edit { preferences ->
+            preferences[CUSTOM_HOLIDAYS] = dates
         }
     }
 }

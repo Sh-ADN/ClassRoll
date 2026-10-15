@@ -38,7 +38,11 @@ fun SettingsScreen(
     var showClearStudentsDialog by remember { mutableStateOf(false) }
     var showExportBackupDialog by remember { mutableStateOf(false) }
     var showRestoreBackupDialog by remember { mutableStateOf(false) }
-    
+    val cloudProgress by viewModel.cloudProgress.collectAsStateWithLifecycle()
+    // Which restore ("cloud" or "file") is waiting for the user to confirm.
+    var pendingRestore by remember { mutableStateOf<String?>(null) }
+    val isSignedIn = authManager?.currentUser != null
+
     var backupJsonText by remember { mutableStateOf("") }
     var restoreInputText by remember { mutableStateOf("") }
     var statusMessage by remember { mutableStateOf("") }
@@ -156,6 +160,41 @@ fun SettingsScreen(
                     backupCopyMsg = ""
                 }) {
                     Text("Close")
+                }
+            }
+        )
+    }
+
+    if (pendingRestore != null) {
+        AlertDialog(
+            onDismissRequest = { pendingRestore = null },
+            title = { Text("Replace all data on this phone?") },
+            text = {
+                Text(
+                    "Restoring erases everything currently stored in the app (students and " +
+                        "attendance) and replaces it with the backup. This cannot be undone. " +
+                        "If you are not sure, cancel and save a backup of your current data first."
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val which = pendingRestore
+                        pendingRestore = null
+                        if (which == "cloud") {
+                            viewModel.restoreFromCloud { _, msg -> statusMessage = msg }
+                        } else if (which == "file") {
+                            openFileLauncher.launch(arrayOf("application/json", "text/*"))
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                ) {
+                    Text("Replace data")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingRestore = null }) {
+                    Text("Cancel")
                 }
             }
         )
@@ -286,12 +325,20 @@ fun SettingsScreen(
                     }
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = authManager?.currentUser?.displayName?.ifBlank { "Teacher Account" } ?: "Teacher Account",
+                            text = if (isSignedIn) {
+                                authManager?.currentUser?.displayName?.ifBlank { "Teacher Account" } ?: "Teacher Account"
+                            } else {
+                                "Offline mode"
+                            },
                             style = MaterialTheme.typography.titleMedium,
                             color = MaterialTheme.colorScheme.onSurface
                         )
                         Text(
-                            text = authManager?.currentUser?.email ?: "Signed in with Google",
+                            text = if (isSignedIn) {
+                                authManager?.currentUser?.email ?: "Signed in with Google"
+                            } else {
+                                "Not signed in. Cloud backup is off."
+                            },
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -308,7 +355,7 @@ fun SettingsScreen(
                         onClick = {
                             viewModel.syncToCloud { success, msg -> statusMessage = msg }
                         },
-                        enabled = !isCloudSyncing,
+                        enabled = !isCloudSyncing && isSignedIn,
                         modifier = Modifier.weight(1f)
                     ) {
                         if (isCloudSyncing) {
@@ -319,14 +366,21 @@ fun SettingsScreen(
                     }
 
                     FilledTonalButton(
-                        onClick = {
-                            viewModel.restoreFromCloud { success, msg -> statusMessage = msg }
-                        },
-                        enabled = !isCloudSyncing,
+                        onClick = { pendingRestore = "cloud" },
+                        enabled = !isCloudSyncing && isSignedIn,
                         modifier = Modifier.weight(1f)
                     ) {
                         Text("Restore Cloud", style = MaterialTheme.typography.labelMedium)
                     }
+                }
+
+                if (isCloudSyncing && cloudProgress.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = cloudProgress,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
 
                 if (statusMessage.isNotEmpty()) {
@@ -351,15 +405,25 @@ fun SettingsScreen(
                     }
                 }
 
-                authManager?.let { auth ->
+                if (isSignedIn) {
+                    authManager?.let { auth ->
+                        Spacer(modifier = Modifier.height(8.dp))
+                        OutlinedButton(
+                            onClick = {
+                                auth.signOut(coroutineScope)
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("Sign Out")
+                        }
+                    }
+                } else {
                     Spacer(modifier = Modifier.height(8.dp))
                     OutlinedButton(
-                        onClick = {
-                            auth.signOut(coroutineScope)
-                        },
+                        onClick = { viewModel.setOfflineMode(false) },
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Text("Sign Out")
+                        Text("Sign in with Google to enable cloud backup")
                     }
                 }
             }
@@ -507,7 +571,7 @@ fun SettingsScreen(
             }
 
             OutlinedButton(
-                onClick = { openFileLauncher.launch(arrayOf("application/json", "text/*")) },
+                onClick = { pendingRestore = "file" },
                 modifier = Modifier.weight(1f)
             ) {
                 Text("Load Backup from File")

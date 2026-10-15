@@ -1,12 +1,14 @@
 package com.aistudio.classroll.jkmxlp.data
 
+import androidx.room.withTransaction
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 
 class ClassRollRepository(
     private val dao: ClassRollDao,
     private val api: ApiService,
-    private val settingsRepo: SettingsRepository
+    private val settingsRepo: SettingsRepository,
+    private val database: AppDatabase? = null
 ) {
     fun getStudentsForYear(year: String): Flow<List<StudentEntity>> {
         return dao.getStudentsForYear(year)
@@ -93,11 +95,30 @@ class ClassRollRepository(
         return dao.getAllAttendanceAllYears()
     }
 
+    // Replaces everything on the phone with the given backup.
+    //  - Refuses an empty backup, so picking the wrong file (or restoring from a
+    //    brand-new empty cloud account) can never wipe real data.
+    //  - Runs as ONE database transaction: either the old data is fully replaced
+    //    or nothing changes. Before, it was four separate steps, so an interruption
+    //    in the middle could leave the app with the old data deleted and nothing restored.
     suspend fun restoreBackupData(students: List<StudentEntity>, records: List<AttendanceRecordEntity>) {
-        dao.clearAllStudents()
-        dao.clearAllAttendance()
-        dao.insertStudents(students)
-        dao.insertAttendanceRecords(records)
+        if (students.isEmpty() && records.isEmpty()) {
+            throw IllegalArgumentException(
+                "The backup contains no students or attendance records, so nothing was changed on this phone."
+            )
+        }
+        val replaceAll: suspend () -> Unit = {
+            dao.clearAllStudents()
+            dao.clearAllAttendance()
+            dao.insertStudents(students)
+            dao.insertAttendanceRecords(records)
+        }
+        val db = database
+        if (db != null) {
+            db.withTransaction { replaceAll() }
+        } else {
+            replaceAll()
+        }
     }
 
     suspend fun updateAppTheme(theme: String) {

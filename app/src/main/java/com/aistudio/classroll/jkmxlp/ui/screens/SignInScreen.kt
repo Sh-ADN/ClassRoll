@@ -23,7 +23,8 @@ import com.google.firebase.auth.FirebaseUser
 @Composable
 fun SignInScreen(
     authManager: AuthManager,
-    onAuthSuccess: (FirebaseUser) -> Unit
+    onAuthSuccess: (FirebaseUser) -> Unit,
+    onContinueOffline: (() -> Unit)? = null
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
@@ -191,6 +192,28 @@ fun SignInScreen(
                         text = "Trouble signing in? View SHA-1 Certificate",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.outline
+                    )
+                }
+
+                // Signing in is only needed for cloud backup. This lets the app be
+                // used (and your data reached) even if sign-in is not working.
+                if (onContinueOffline != null) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedButton(
+                        onClick = onContinueOffline,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("continue_offline_button")
+                    ) {
+                        Text("Continue without signing in (offline only)")
+                    }
+                    Text(
+                        text = "You can still take attendance and save backups to a file. " +
+                            "Sign in later from Settings to use cloud backup.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.outline,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.padding(top = 6.dp)
                     )
                 }
             }
