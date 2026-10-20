@@ -1,21 +1,70 @@
 package com.aistudio.classroll.jkmxlp.ui.screens
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.DateRange
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.filled.CalendarMonth
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.DatePicker
+import androidx.compose.material3.DatePickerDialog
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SuggestionChip
+import androidx.compose.material3.Surface
+import androidx.compose.material3.SwipeToDismissBox
+import androidx.compose.material3.SwipeToDismissBoxValue
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberDatePickerState
+import androidx.compose.material3.rememberSwipeToDismissBoxState
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aistudio.classroll.jkmxlp.data.AttendanceRecordEntity
 import com.aistudio.classroll.jkmxlp.data.StudentEntity
 import com.aistudio.classroll.jkmxlp.ui.ClassRollViewModel
-import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
@@ -23,58 +72,348 @@ import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun HomeScreen(viewModel: ClassRollViewModel) {
+fun HomeScreen(
+    viewModel: ClassRollViewModel
+) {
     val students by viewModel.students.collectAsStateWithLifecycle()
-    val activeStudents = remember(students) { students.filter { it.name.isNotBlank() } }
     val currentYear by viewModel.currentYear.collectAsStateWithLifecycle()
     val holidays by viewModel.holidays.collectAsStateWithLifecycle()
-    var currentIndex by remember { mutableStateOf(0) }
-    var date by remember { mutableStateOf(SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())) }
+    val allAttendance by viewModel.allAttendanceForYear.collectAsStateWithLifecycle()
+
+    var selectedCalendar by remember { mutableStateOf(Calendar.getInstance()) }
     var showDatePicker by remember { mutableStateOf(false) }
-    // FIX: tracks rolls in the order they were actually marked today, so
-    // "Undo" always undoes the real last action instead of assuming it's
-    // whichever student sits last in roster order.
-    val swipedRolls = remember(date, currentYear) { mutableStateListOf<String>() }
+    var searchQuery by remember { mutableStateOf("") }
 
-    val dateRecordsFlow = remember(date, currentYear) { viewModel.getAttendanceForDate(date) }
-    val dateRecords by dateRecordsFlow.collectAsStateWithLifecycle(initialValue = emptyList())
+    val dateFormat = remember { SimpleDateFormat("yyyy-MM-dd", Locale.US) }
+    val displayDateFormat = remember { SimpleDateFormat("EEEE, MMM dd, yyyy", Locale.US) }
+    val currentDateStr = dateFormat.format(selectedCalendar.time)
 
-    val recordedRolls = remember(dateRecords) { 
-        dateRecords.filter { it.status.isNotBlank() }.map { it.roll }.toSet() 
+    val dateRecords by viewModel.getAttendanceForDate(currentDateStr)
+        .collectAsStateWithLifecycle(initialValue = emptyList())
+    val attendanceMap = dateRecords.associateBy { it.roll }
+
+    val dayOfWeek = selectedCalendar.get(Calendar.DAY_OF_WEEK)
+    val isWeekend = dayOfWeek == Calendar.SUNDAY || dayOfWeek == Calendar.FRIDAY
+    val isHoliday = holidays.contains(currentDateStr)
+    val isLocked = isWeekend || isHoliday
+
+    val presentCount = dateRecords.count { it.status == "PRESENT" }
+    val absentCount = dateRecords.count { it.status == "ABSENT" }
+    val totalRecorded = presentCount + absentCount
+    val attendanceRate = if (totalRecorded > 0) (presentCount * 100f / totalRecorded) else 0f
+
+    val filteredStudents = students.filter { s ->
+        searchQuery.isBlank() || s.name.contains(searchQuery, ignoreCase = true) || s.roll.contains(searchQuery)
     }
 
-    LaunchedEffect(dateRecords, activeStudents, date, currentYear) {
-        if (activeStudents.isNotEmpty()) {
-            val firstUnrecordedIndex = activeStudents.indexOfFirst { it.roll !in recordedRolls }
-            if (firstUnrecordedIndex != -1) {
-                currentIndex = firstUnrecordedIndex
-            } else if (recordedRolls.isNotEmpty()) {
-                currentIndex = activeStudents.size
+    Scaffold { innerPadding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding)
+                .padding(16.dp)
+        ) {
+            // Date navigation bar
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    IconButton(
+                        onClick = {
+                            val newCal = selectedCalendar.clone() as Calendar
+                            newCal.add(Calendar.DAY_OF_YEAR, -1)
+                            selectedCalendar = newCal
+                        },
+                        modifier = Modifier.testTag("prev_day_button")
+                    ) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Previous Day")
+                    }
+
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .clickable { showDatePicker = true }
+                            .padding(8.dp)
+                            .testTag("date_picker_button")
+                    ) {
+                        Icon(Icons.Default.CalendarMonth, contentDescription = null, modifier = Modifier.size(20.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(
+                                text = displayDateFormat.format(selectedCalendar.time),
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold
+                            )
+                            if (isLocked) {
+                                Text(
+                                    text = if (isHoliday) "Custom Holiday" else "Weekend",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.error
+                                )
+                            }
+                        }
+                    }
+
+                    IconButton(
+                        onClick = {
+                            val newCal = selectedCalendar.clone() as Calendar
+                            newCal.add(Calendar.DAY_OF_YEAR, 1)
+                            selectedCalendar = newCal
+                        },
+                        modifier = Modifier.testTag("next_day_button")
+                    ) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = "Next Day")
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Attendance overview stat pills
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Card(
+                    modifier = Modifier.weight(1f),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFFE8F5E9))
+                ) {
+                    Column(
+                        modifier = Modifier.padding(12.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text("Present", style = MaterialTheme.typography.labelMedium, color = Color(0xFF2E7D32))
+                        Text(
+                            "$presentCount",
+                            style = MaterialTheme.typography.headlineMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF1B5E20)
+                        )
+                    }
+                }
+
+                Card(
+                    modifier = Modifier.weight(1f),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFFFFEBEE))
+                ) {
+                    Column(
+                        modifier = Modifier.padding(12.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text("Absent", style = MaterialTheme.typography.labelMedium, color = Color(0xFFC62828))
+                        Text(
+                            "$absentCount",
+                            style = MaterialTheme.typography.headlineMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFFB71C1C)
+                        )
+                    }
+                }
+
+                Card(
+                    modifier = Modifier.weight(1f),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+                ) {
+                    Column(
+                        modifier = Modifier.padding(12.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text("Rate", style = MaterialTheme.typography.labelMedium)
+                        Text(
+                            "%.0f%%".format(attendanceRate),
+                            style = MaterialTheme.typography.headlineMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Action row: Mark all present / Mark all absent
+            if (!isLocked && students.isNotEmpty()) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Button(
+                        onClick = {
+                            val newRecords = students.map {
+                                AttendanceRecordEntity(
+                                    year = currentYear,
+                                    date = currentDateStr,
+                                    roll = it.roll,
+                                    status = "PRESENT"
+                                )
+                            }
+                            viewModel.submitAttendance(newRecords)
+                        },
+                        modifier = Modifier
+                            .weight(1f)
+                            .testTag("mark_all_present_button"),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E7D32))
+                    ) {
+                        Icon(Icons.Default.CheckCircle, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("All Present")
+                    }
+
+                    OutlinedButton(
+                        onClick = {
+                            val newRecords = students.map {
+                                AttendanceRecordEntity(
+                                    year = currentYear,
+                                    date = currentDateStr,
+                                    roll = it.roll,
+                                    status = "ABSENT"
+                                )
+                            }
+                            viewModel.submitAttendance(newRecords)
+                        },
+                        modifier = Modifier
+                            .weight(1f)
+                            .testTag("mark_all_absent_button")
+                    ) {
+                        Icon(Icons.Default.Clear, contentDescription = null, modifier = Modifier.size(18.dp), tint = Color(0xFFC62828))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("All Absent", color = Color(0xFFC62828))
+                    }
+                }
+                Spacer(modifier = Modifier.height(12.dp))
+            }
+
+            if (isLocked) {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Default.Info, contentDescription = null, tint = MaterialTheme.colorScheme.error)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = if (isHoliday) "Today is marked as Holiday. Attendance taking is disabled." else "Today is a Weekend. Attendance taking is disabled.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onErrorContainer
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.height(12.dp))
+            }
+
+            // Search bar
+            OutlinedTextField(
+                value = searchQuery,
+                onValueChange = { searchQuery = it },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("home_search_input"),
+                placeholder = { Text("Search by student name or roll...") },
+                singleLine = true
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // Student list
+            if (filteredStudents.isEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .weight(1f),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(
+                            imageVector = Icons.Default.Info,
+                            contentDescription = null,
+                            modifier = Modifier.size(48.dp),
+                            tint = MaterialTheme.colorScheme.outline
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = if (students.isEmpty()) "No students found for year $currentYear.\nGo to 'Import Students' to add students." else "No students match '$searchQuery'",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.outline
+                        )
+                    }
+                }
             } else {
-                currentIndex = 0
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    items(filteredStudents, key = { it.roll }) { student ->
+                        val record = attendanceMap[student.roll]
+                        val status = record?.status ?: "UNRECORDED"
+
+                        // Calculate student streak
+                        val studentRecords = allAttendance
+                            .filter { it.roll == student.roll && it.date <= currentDateStr }
+                            .sortedByDescending { it.date }
+
+                        var streakCount = 0
+                        var streakStatus = ""
+                        for (r in studentRecords) {
+                            if (streakStatus.isEmpty()) {
+                                streakStatus = r.status
+                                streakCount = 1
+                            } else if (r.status == streakStatus) {
+                                streakCount++
+                            } else {
+                                break
+                            }
+                        }
+
+                        SwipeableStudentCard(
+                            student = student,
+                            status = status,
+                            streakCount = streakCount,
+                            streakStatus = streakStatus,
+                            isLocked = isLocked,
+                            onStatusSelected = { newStatus ->
+                                if (!isLocked) {
+                                    viewModel.updateCell(
+                                        roll = student.roll,
+                                        status = newStatus,
+                                        date = currentDateStr
+                                    )
+                                }
+                            }
+                        )
+                    }
+                }
             }
         }
     }
 
     if (showDatePicker) {
         val datePickerState = rememberDatePickerState(
-            initialSelectedDateMillis = try {
-                SimpleDateFormat("yyyy-MM-dd", Locale.US).parse(date)?.time
-            } catch (e: Exception) {
-                System.currentTimeMillis()
-            }
+            initialSelectedDateMillis = selectedCalendar.timeInMillis
         )
         DatePickerDialog(
             onDismissRequest = { showDatePicker = false },
             confirmButton = {
                 TextButton(onClick = {
-                    datePickerState.selectedDateMillis?.let {
-                        date = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date(it))
-                        currentIndex = 0
+                    datePickerState.selectedDateMillis?.let { millis ->
+                        val newCal = Calendar.getInstance()
+                        newCal.timeInMillis = millis
+                        selectedCalendar = newCal
                     }
                     showDatePicker = false
                 }) {
-                    Text("OK")
+                    Text("Select")
                 }
             },
             dismissButton = {
@@ -86,536 +425,115 @@ fun HomeScreen(viewModel: ClassRollViewModel) {
             DatePicker(state = datePickerState)
         }
     }
-
-    if (activeStudents.isEmpty()) {
-        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text("No students found. Import students first.")
-        }
-        return
-    }
-
-    val displayDate = remember(date) { formatDisplayDate(date) }
-
-    val isWeekendDay = remember(date) { isWeekend(date) }
-    val isCustomHoliday = remember(date, holidays) { holidays.contains(date) }
-
-    if (isWeekendDay || isCustomHoliday) {
-        Column(Modifier.fillMaxSize().padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Attendance for $displayDate", style = MaterialTheme.typography.titleLarge)
-                    IconButton(onClick = { showDatePicker = true }) {
-                        Icon(Icons.Default.DateRange, contentDescription = "Select Date")
-                    }
-                }
-            }
-            
-            Spacer(Modifier.height(48.dp))
-            
-            val reason = if (isWeekendDay) "Weekend (Friday/Saturday)" else "School Holiday"
-            
-            val calendarIconDate = remember(date) {
-                try {
-                    val d = SimpleDateFormat("yyyy-MM-dd", Locale.US).parse(date) ?: Date()
-                    val m = SimpleDateFormat("MMM", Locale.US).format(d).uppercase(Locale.US)
-                    val dy = SimpleDateFormat("d", Locale.US).format(d)
-                    Pair(m, dy)
-                } catch (e: Exception) {
-                    Pair("---", "-")
-                }
-            }
-            
-            Card(
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
-                modifier = Modifier.fillMaxWidth().padding(16.dp)
-            ) {
-                Column(
-                    modifier = Modifier.padding(24.dp).fillMaxWidth(),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.Center
-                ) {
-                    Card(
-                        modifier = Modifier.size(72.dp),
-                        shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                        elevation = CardDefaults.cardElevation(defaultElevation = 6.dp)
-                    ) {
-                        Column(Modifier.fillMaxSize()) {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .weight(0.35f)
-                                    .background(if (isCustomHoliday && !isWeekendDay) Color(0xFF00897B) else Color(0xFFE53935)),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(
-                                    text = calendarIconDate.first,
-                                    color = Color.White,
-                                    style = MaterialTheme.typography.labelMedium,
-                                    fontWeight = androidx.compose.ui.text.font.FontWeight.Bold
-                                )
-                            }
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .weight(0.65f),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(
-                                    text = calendarIconDate.second,
-                                    color = MaterialTheme.colorScheme.onSurface,
-                                    style = MaterialTheme.typography.headlineMedium,
-                                    fontWeight = androidx.compose.ui.text.font.FontWeight.Bold
-                                )
-                            }
-                        }
-                    }
-                    Spacer(Modifier.height(16.dp))
-                    Text(
-                        text = "School is Off",
-                        style = MaterialTheme.typography.headlineMedium,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                    Spacer(Modifier.height(8.dp))
-                    Text(
-                        text = "This day is marked as a $reason. Attendance taking is disabled.",
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                    )
-                }
-            }
-        }
-        return
-    }
-
-    if (currentIndex >= activeStudents.size) {
-        val presentCount = dateRecords.count { it.status == "P" }
-        val absentCount = dateRecords.count { it.status == "A" }
-        Column(Modifier.fillMaxSize().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-            Text("Summary", style = MaterialTheme.typography.headlineLarge)
-            Spacer(Modifier.height(8.dp))
-            Text("Attendance for $displayDate saved automatically!", style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.primary)
-            Spacer(Modifier.height(24.dp))
-            Card(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
-            ) {
-                Column(Modifier.padding(24.dp).fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("Present: $presentCount", style = MaterialTheme.typography.titleLarge, color = Color(0xFF2E7D32))
-                    Spacer(Modifier.height(8.dp))
-                    Text("Absent: $absentCount", style = MaterialTheme.typography.titleLarge, color = Color(0xFFC62828))
-                }
-            }
-            Spacer(Modifier.height(32.dp))
-            Row {
-                Button(onClick = {
-                    viewModel.clearAttendanceForDate(date)
-                    swipedRolls.clear()
-                }) {
-                    Text("Clear & Retake Today")
-                }
-                Spacer(Modifier.width(16.dp))
-                OutlinedButton(
-                    onClick = {
-                        val lastRoll = swipedRolls.removeLastOrNull()
-                        if (lastRoll != null) {
-                            viewModel.deleteAttendanceRecord(date, lastRoll)
-                        }
-                    },
-                    enabled = swipedRolls.isNotEmpty()
-                ) {
-                    Text("Undo Last")
-                }
-            }
-        }
-        return
-    }
-
-    val currentStudent = activeStudents[currentIndex]
-
-    Column(Modifier.fillMaxSize().padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Attendance for $displayDate", style = MaterialTheme.typography.titleLarge)
-                    IconButton(onClick = { showDatePicker = true }) {
-                        Icon(Icons.Default.DateRange, contentDescription = "Select Date")
-                    }
-                }
-                Text("${currentIndex + 1} / ${activeStudents.size}", style = MaterialTheme.typography.bodyLarge)
-            }
-            if (currentIndex > 0 && swipedRolls.isNotEmpty()) {
-                TextButton(onClick = {
-                    val lastRoll = swipedRolls.removeLastOrNull()
-                    if (lastRoll != null) {
-                        viewModel.deleteAttendanceRecord(date, lastRoll)
-                        val rollIndex = activeStudents.indexOfFirst { it.roll == lastRoll }
-                        currentIndex = if (rollIndex >= 0) rollIndex else (currentIndex - 1).coerceAtLeast(0)
-                    }
-                }) {
-                    Text("Undo")
-                }
-            }
-        }
-        
-        Spacer(Modifier.height(16.dp))
-        
-        // Progress bar
-        LinearProgressIndicator(
-            progress = { (currentIndex.toFloat() / activeStudents.size.toFloat()).coerceIn(0f, 1f) },
-            modifier = Modifier.fillMaxWidth().height(8.dp),
-            color = MaterialTheme.colorScheme.primary,
-            trackColor = MaterialTheme.colorScheme.surfaceVariant,
-        )
-
-        Spacer(Modifier.height(16.dp))
-
-        // Quick Batch Actions
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceEvenly
-        ) {
-            OutlinedButton(onClick = {
-                val allPresent = activeStudents.map { AttendanceRecordEntity(currentYear, date, it.roll, "P", true) }
-                viewModel.submitAttendance(date, allPresent) { }
-                swipedRolls.clear()
-                swipedRolls.addAll(activeStudents.map { it.roll })
-                currentIndex = activeStudents.size
-            }) {
-                Text("Mark All Present")
-            }
-            
-            OutlinedButton(onClick = {
-                val allAbsent = activeStudents.map { AttendanceRecordEntity(currentYear, date, it.roll, "A", true) }
-                viewModel.submitAttendance(date, allAbsent) { }
-                swipedRolls.clear()
-                swipedRolls.addAll(activeStudents.map { it.roll })
-                currentIndex = activeStudents.size
-            }) {
-                Text("Mark All Absent")
-            }
-        }
-
-        Spacer(Modifier.height(16.dp))
-        
-        key(currentStudent.roll) {
-            val allAttendanceForYear by viewModel.allAttendanceForYear.collectAsStateWithLifecycle(initialValue = emptyList())
-            val studentRecords = remember(allAttendanceForYear, currentStudent.roll) {
-                allAttendanceForYear.filter { it.roll == currentStudent.roll }
-            }
-            SwipeableStudentCard(
-                student = currentStudent,
-                attendanceRecords = studentRecords,
-                onSwiped = { status ->
-                    viewModel.updateCell(date, currentStudent.roll, status)
-                    swipedRolls.add(currentStudent.roll)
-                    currentIndex++
-                },
-                modifier = Modifier.weight(1f)
-            )
-        }
-
-        Spacer(Modifier.height(8.dp))
-    }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun SwipeableStudentCard(
+fun SwipeableStudentCard(
     student: StudentEntity,
-    attendanceRecords: List<AttendanceRecordEntity>,
-    onSwiped: (String) -> Unit,
-    modifier: Modifier = Modifier
+    status: String,
+    streakCount: Int,
+    streakStatus: String,
+    isLocked: Boolean,
+    onStatusSelected: (String) -> Unit
 ) {
-    val dismissState = rememberSwipeToDismissBoxState(
-        confirmValueChange = { dismissValue ->
-            dismissValue != SwipeToDismissBoxValue.Settled
-        }
-    )
-    val coroutineScope = rememberCoroutineScope()
-
-    LaunchedEffect(dismissState.currentValue) {
-        when (dismissState.currentValue) {
-            SwipeToDismissBoxValue.StartToEnd -> onSwiped("P")
-            SwipeToDismissBoxValue.EndToStart -> onSwiped("A")
-            else -> {}
-        }
+    val cardColor = when (status) {
+        "PRESENT" -> Color(0xFFF1F8E9)
+        "ABSENT" -> Color(0xFFFFEBEE)
+        else -> MaterialTheme.colorScheme.surface
     }
 
-    // --- 1. Attendance Rate Calculation ---
-    val totalSessions = attendanceRecords.size
-    val presentCount = attendanceRecords.count { it.status == "P" }
-    val attendanceRate = if (totalSessions > 0) (presentCount.toFloat() / totalSessions.toFloat()) else 1.0f
-    val ratePercentage = (attendanceRate * 100).toInt()
-
-    val rateColor = when {
-        totalSessions == 0 -> MaterialTheme.colorScheme.primary
-        ratePercentage >= 75 -> Color(0xFF2E7D32)
-        ratePercentage >= 60 -> Color(0xFFF57C00)
-        else -> Color(0xFFC62828)
-    }
-
-    // --- 2. Streak Calculation ---
-    val sortedRecords = remember(attendanceRecords) {
-        attendanceRecords.sortedByDescending { it.date }
-    }
-    val currentStreakStatus = sortedRecords.firstOrNull()?.status
-    val streakCount = if (currentStreakStatus != null) {
-        sortedRecords.takeWhile { it.status == currentStreakStatus }.size
-    } else 0
-
-    val streakBadgeText = when {
-        totalSessions == 0 -> "✨ New Student"
-        currentStreakStatus == "P" -> "🔥 $streakCount Session Present Streak"
-        currentStreakStatus == "A" -> "⚠️ $streakCount Session Absence Streak"
-        else -> "No history"
-    }
-
-    // --- 3. Last Recorded Status ---
-    val lastRecord = sortedRecords.firstOrNull()
-    val lastSessionText = if (lastRecord != null) {
-        val formattedLastDate = formatDisplayDate(lastRecord.date)
-        val statusName = if (lastRecord.status == "P") "Present" else "Absent"
-        "Last Status: $statusName ($formattedLastDate)"
-    } else {
-        "First attendance entry for this student"
-    }
-
-    Column(modifier = modifier) {
-        SwipeToDismissBox(
-            state = dismissState,
-            modifier = Modifier.weight(1f),
-            backgroundContent = {
-                val color = when (dismissState.targetValue) {
-                    SwipeToDismissBoxValue.StartToEnd -> Color(0xFF4CAF50)
-                    SwipeToDismissBoxValue.EndToStart -> Color(0xFFF44336)
-                    else -> Color.LightGray
-                }
-                val alignment = when (dismissState.targetValue) {
-                    SwipeToDismissBoxValue.StartToEnd -> Alignment.CenterStart
-                    SwipeToDismissBoxValue.EndToStart -> Alignment.CenterEnd
-                    else -> Alignment.Center
-                }
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("student_card_${student.roll}"),
+        colors = CardDefaults.cardColors(containerColor = cardColor),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.weight(1f)
+            ) {
+                // Roll avatar
                 Box(
-                    Modifier.fillMaxSize().background(color, MaterialTheme.shapes.large).padding(24.dp),
-                    contentAlignment = alignment
+                    modifier = Modifier
+                        .size(42.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.primaryContainer),
+                    contentAlignment = Alignment.Center
                 ) {
                     Text(
-                        when (dismissState.targetValue) {
-                            SwipeToDismissBoxValue.StartToEnd -> "PRESENT"
-                            SwipeToDismissBoxValue.EndToStart -> "ABSENT"
-                            else -> ""
-                        },
-                        color = Color.White,
-                        style = MaterialTheme.typography.headlineMedium
+                        text = student.roll,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer
                     )
                 }
-            }
-        ) {
-            Card(
-                modifier = Modifier.fillMaxSize(),
-                elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surface
-                )
-            ) {
-                Column(
-                    Modifier
-                        .fillMaxSize()
-                        .padding(20.dp),
-                    verticalArrangement = Arrangement.SpaceBetween,
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    // Top Section: Roll Number Pill Badge & Streak Badge
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Surface(
-                            shape = MaterialTheme.shapes.small,
-                            color = MaterialTheme.colorScheme.primaryContainer,
-                            modifier = Modifier.padding(2.dp)
-                        ) {
-                            Text(
-                                text = "Roll #${student.roll}",
-                                style = MaterialTheme.typography.titleMedium,
-                                color = MaterialTheme.colorScheme.onPrimaryContainer,
-                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
-                            )
-                        }
+                Spacer(modifier = Modifier.width(12.dp))
 
-                        // Streak Badge (Insight 2)
-                        Surface(
-                            shape = MaterialTheme.shapes.small,
-                            color = if (currentStreakStatus == "A") Color(0xFFFFEBEE) else Color(0xFFE8F5E9)
-                        ) {
+                Column {
+                    Text(
+                        text = student.name,
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (streakCount >= 2) {
                             Text(
-                                text = streakBadgeText,
-                                style = MaterialTheme.typography.labelMedium,
-                                color = if (currentStreakStatus == "A") Color(0xFFC62828) else Color(0xFF2E7D32),
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                                text = "$streakCount $streakStatus Streak",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = if (streakStatus == "PRESENT") Color(0xFF2E7D32) else Color(0xFFC62828),
+                                fontWeight = FontWeight.Bold
                             )
+                            Spacer(modifier = Modifier.width(8.dp))
                         }
-                    }
-
-                    // Center Section: Student Name
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        modifier = Modifier.padding(vertical = 12.dp)
-                    ) {
                         Text(
-                            text = student.name,
-                            style = MaterialTheme.typography.headlineLarge,
-                            color = MaterialTheme.colorScheme.onSurface
+                            text = "Status: $status",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.outline
                         )
                     }
+                }
+            }
 
-                    // Bottom Section: Student Stats Box (Insight 1 & Insight 3)
-                    Card(
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
+            // Quick P / A action buttons
+            if (!isLocked) {
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Button(
+                        onClick = { onStatusSelected("PRESENT") },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (status == "PRESENT") Color(0xFF2E7D32) else MaterialTheme.colorScheme.surfaceVariant,
+                            contentColor = if (status == "PRESENT") Color.White else MaterialTheme.colorScheme.onSurfaceVariant
                         ),
-                        shape = MaterialTheme.shapes.medium
+                        modifier = Modifier
+                            .size(width = 46.dp, height = 40.dp)
+                            .testTag("present_btn_${student.roll}")
                     ) {
-                        Column(
-                            modifier = Modifier.padding(14.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            // Insight 1: Overall Attendance Rate Progress Bar & Ratio
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(
-                                    text = "Attendance Rate",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                                Text(
-                                    text = if (totalSessions > 0) "$ratePercentage% ($presentCount/$totalSessions Days)" else "N/A",
-                                    style = MaterialTheme.typography.titleSmall,
-                                    color = rateColor
-                                )
-                            }
+                        Text("P", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                    }
 
-                            LinearProgressIndicator(
-                                progress = { if (totalSessions > 0) attendanceRate else 1f },
-                                modifier = Modifier.fillMaxWidth().height(6.dp),
-                                color = rateColor,
-                                trackColor = rateColor.copy(alpha = 0.2f)
-                            )
-
-                            HorizontalDivider(
-                                modifier = Modifier.padding(vertical = 2.dp),
-                                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
-                            )
-
-                            // Insight 3 & 4: Last Recorded Status & Recent History Dots
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(
-                                    text = lastSessionText,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-
-                                Row(
-                                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    val recentRecords = sortedRecords.take(5).reversed()
-                                    recentRecords.forEach { record ->
-                                        Box(
-                                            modifier = Modifier
-                                                .size(10.dp)
-                                                .background(
-                                                    color = if (record.status == "P") Color(0xFF4CAF50) else Color(0xFFF44336),
-                                                    shape = CircleShape
-                                                )
-                                        )
-                                    }
-                                }
-                            }
-                        }
+                    Button(
+                        onClick = { onStatusSelected("ABSENT") },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (status == "ABSENT") Color(0xFFC62828) else MaterialTheme.colorScheme.surfaceVariant,
+                            contentColor = if (status == "ABSENT") Color.White else MaterialTheme.colorScheme.onSurfaceVariant
+                        ),
+                        modifier = Modifier
+                            .size(width = 46.dp, height = 40.dp)
+                            .testTag("absent_btn_${student.roll}")
+                    ) {
+                        Text("A", fontWeight = FontWeight.Bold, fontSize = 16.sp)
                     }
                 }
             }
         }
-
-        Spacer(Modifier.height(16.dp))
-
-        // Tap action buttons for Present/Absent
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceEvenly
-        ) {
-            Button(
-                onClick = {
-                    coroutineScope.launch {
-                        dismissState.dismiss(SwipeToDismissBoxValue.StartToEnd)
-                    }
-                },
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4CAF50)),
-                modifier = Modifier.weight(1f).height(50.dp).padding(end = 8.dp)
-            ) {
-                Text("Present (Swipe Right)", color = Color.White)
-            }
-
-            Button(
-                onClick = {
-                    coroutineScope.launch {
-                        dismissState.dismiss(SwipeToDismissBoxValue.EndToStart)
-                    }
-                },
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFF44336)),
-                modifier = Modifier.weight(1f).height(50.dp).padding(start = 8.dp)
-            ) {
-                Text("Absent (Swipe Left)", color = Color.White)
-            }
-        }
-    }
-}
-
-private fun formatDisplayDate(dateString: String): String {
-    return try {
-        val date = SimpleDateFormat("yyyy-MM-dd", Locale.US).parse(dateString) ?: return dateString
-        val day = SimpleDateFormat("d", Locale.US).format(date).toInt()
-        val suffix = when {
-            day in 11..13 -> "th"
-            day % 10 == 1 -> "st"
-            day % 10 == 2 -> "nd"
-            day % 10 == 3 -> "rd"
-            else -> "th"
-        }
-        val monthYear = SimpleDateFormat("MMMM, yyyy", Locale.US).format(date)
-        "${day}${suffix} $monthYear"
-    } catch (e: Exception) {
-        dateString
-    }
-}
-
-private fun isWeekend(dateStr: String): Boolean {
-    return try {
-        val date = SimpleDateFormat("yyyy-MM-dd", Locale.US).parse(dateStr) ?: return false
-        val cal = Calendar.getInstance().apply { time = date }
-        val dayOfWeek = cal.get(Calendar.DAY_OF_WEEK)
-        dayOfWeek == Calendar.FRIDAY || dayOfWeek == Calendar.SATURDAY
-    } catch (e: Exception) {
-        false
     }
 }

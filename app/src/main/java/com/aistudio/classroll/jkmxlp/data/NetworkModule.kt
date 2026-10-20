@@ -7,20 +7,19 @@ import retrofit2.Retrofit
 import retrofit2.converter.moshi.MoshiConverterFactory
 
 object NetworkModule {
-    private val moshi = Moshi.Builder()
-        .build()
+    private val moshi: Moshi = Moshi.Builder().build()
 
-    private val loggingInterceptor = HttpLoggingInterceptor().apply {
+    private val loggingInterceptor: HttpLoggingInterceptor = HttpLoggingInterceptor().apply {
         level = HttpLoggingInterceptor.Level.BODY
     }
 
-    private val client = OkHttpClient.Builder()
+    private val client: OkHttpClient = OkHttpClient.Builder()
         .addInterceptor(loggingInterceptor)
         .build()
 
     val apiService: ApiService by lazy {
         Retrofit.Builder()
-            .baseUrl("https://script.google.com/") // Dummy base URL, we use @Url
+            .baseUrl("https://script.google.com/")
             .client(client)
             .addConverterFactory(MoshiConverterFactory.create(moshi))
             .build()
