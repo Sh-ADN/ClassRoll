@@ -1,472 +1,160 @@
 package com.aistudio.classroll.jkmxlp.ui.screens
 
-import android.content.ClipData
-import android.content.ClipboardManager
-import android.content.Context
-import android.content.Intent
-import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.ArrowForward
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.ArrowForward
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Share
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.FloatingActionButton
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
+import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.aistudio.classroll.jkmxlp.data.StudentEntity
+import com.aistudio.classroll.jkmxlp.data.AttendanceRecordEntity
 import com.aistudio.classroll.jkmxlp.ui.ClassRollViewModel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Calendar
+import java.util.Date
 import java.util.Locale
 
 @Composable
-fun RegisterScreen(
-    viewModel: ClassRollViewModel
-) {
-    val context = LocalContext.current
+fun RegisterScreen(viewModel: ClassRollViewModel) {
     val students by viewModel.students.collectAsStateWithLifecycle()
     val currentYear by viewModel.currentYear.collectAsStateWithLifecycle()
     val holidays by viewModel.holidays.collectAsStateWithLifecycle()
-
+    
     var selectedCalendar by remember { mutableStateOf(Calendar.getInstance()) }
     val monthFormat = remember { SimpleDateFormat("yyyy-MM", Locale.US) }
     val monthTitleFormat = remember { SimpleDateFormat("MMMM yyyy", Locale.US) }
-    val monthPrefix = monthFormat.format(selectedCalendar.time)
 
-    val monthRecords by viewModel.getAttendanceForMonth(monthPrefix)
-        .collectAsStateWithLifecycle(initialValue = emptyList())
+    val selectedMonthStr = remember(selectedCalendar) { monthFormat.format(selectedCalendar.time) }
+    val selectedMonthTitle = remember(selectedCalendar) { monthTitleFormat.format(selectedCalendar.time) }
+    
+    val attendanceRecordsFlow = remember(selectedMonthStr, currentYear) { viewModel.getAttendanceForMonth(selectedMonthStr) }
+    val attendanceRecords by attendanceRecordsFlow.collectAsStateWithLifecycle()
 
-    val attendanceMap = remember(monthRecords) {
-        monthRecords.associateBy { "${it.date}_${it.roll}" }
+    val attendanceMap = remember(attendanceRecords) {
+        attendanceRecords.groupBy { it.roll }.mapValues { (_, records) -> records.associateBy { it.date } }
     }
-
-    // Days in current month
-    val daysInMonth = remember(selectedCalendar) {
-        val cal = selectedCalendar.clone() as Calendar
-        cal.set(Calendar.DAY_OF_MONTH, 1)
-        val maxDay = cal.getActualMaximum(Calendar.DAY_OF_MONTH)
-        (1..maxDay).map { day ->
-            val dayCal = cal.clone() as Calendar
-            dayCal.set(Calendar.DAY_OF_MONTH, day)
-            val dateStr = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(dayCal.time)
-            val dow = dayCal.get(Calendar.DAY_OF_WEEK)
-            val isWeekend = dow == Calendar.SUNDAY || dow == Calendar.FRIDAY
-            Triple(day, dateStr, isWeekend)
-        }
-    }
-
+    
+    var searchQuery by remember { mutableStateOf("") }
     var showStudentDialog by remember { mutableStateOf(false) }
     var editingStudentRoll by remember { mutableStateOf("") }
     var editingStudentName by remember { mutableStateOf("") }
-    var isNewStudent by remember { mutableStateOf(true) }
-
+    
     var showExportMenu by remember { mutableStateOf(false) }
+    var summaryDate by remember { mutableStateOf<String?>(null) }
+    
+    // Holiday toggle confirmation & 5-second undo state
     var holidayConfirmDate by remember { mutableStateOf<String?>(null) }
+    var undoDate by remember { mutableStateOf<String?>(null) }
+    var undoMessage by remember { mutableStateOf("") }
+    var undoRemainingSeconds by remember { mutableIntStateOf(5) }
 
-    Scaffold(
-        floatingActionButton = {
-            FloatingActionButton(
-                onClick = {
-                    val nextRoll = (students.mapNotNull { it.roll.toIntOrNull() }.maxOrNull() ?: 0) + 1
-                    editingStudentRoll = nextRoll.toString()
-                    editingStudentName = ""
-                    isNewStudent = true
-                    showStudentDialog = true
-                },
-                modifier = Modifier.testTag("add_student_fab")
-            ) {
-                Icon(Icons.Default.Add, contentDescription = "Add Student")
+    val coroutineScope = rememberCoroutineScope()
+
+    // 5-second timer countdown for undo
+    LaunchedEffect(undoDate) {
+        if (undoDate != null) {
+            undoRemainingSeconds = 5
+            while (undoRemainingSeconds > 0) {
+                delay(1000L)
+                undoRemainingSeconds--
+            }
+            undoDate = null
+            undoMessage = ""
+        }
+    }
+
+    fun triggerHolidayToggleWithUndo(date: String, wasHoliday: Boolean) {
+        viewModel.toggleHoliday(date)
+        undoDate = date
+        undoMessage = if (wasHoliday) "Removed holiday for $date" else "Marked $date as Holiday"
+    }
+
+    val clipboardManager = LocalClipboardManager.current
+    var copyMessage by remember { mutableStateOf("") }
+    val context = LocalContext.current
+    var pendingCsvContent by remember { mutableStateOf("") }
+    // Days after today have not happened yet, so they must not count as working days.
+    val todayStr = remember { SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date()) }
+    val saveCsvLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("text/csv")
+    ) { uri ->
+        if (uri != null && pendingCsvContent.isNotBlank()) {
+            try {
+                context.contentResolver.openOutputStream(uri)?.use { out ->
+                    // UTF-8 byte-order mark: without it Excel on Windows shows Bengali
+                    // (and other non-English) names as garbled characters.
+                    out.write(byteArrayOf(0xEF.toByte(), 0xBB.toByte(), 0xBF.toByte()))
+                    out.write(pendingCsvContent.toByteArray(Charsets.UTF_8))
+                }
+                copyMessage = "Saved to file."
+            } catch (e: Exception) {
+                copyMessage = "Failed to save: ${e.message}"
             }
         }
-    ) { innerPadding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding)
-                .padding(12.dp)
-        ) {
-            // Month navigation & Export
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    IconButton(
-                        onClick = {
-                            val newCal = selectedCalendar.clone() as Calendar
-                            newCal.add(Calendar.MONTH, -1)
-                            selectedCalendar = newCal
-                        },
-                        modifier = Modifier.testTag("prev_month_button")
-                    ) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Prev Month")
-                    }
+    }
 
-                    Text(
-                        text = monthTitleFormat.format(selectedCalendar.time),
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.Bold
-                    )
-
-                    IconButton(
-                        onClick = {
-                            val newCal = selectedCalendar.clone() as Calendar
-                            newCal.add(Calendar.MONTH, 1)
-                            selectedCalendar = newCal
-                        },
-                        modifier = Modifier.testTag("next_month_button")
-                    ) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = "Next Month")
-                    }
+    var pendingPdfContent by remember { mutableStateOf<ByteArray?>(null) }
+    val savePdfLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/pdf")
+    ) { uri ->
+        if (uri != null && pendingPdfContent != null) {
+            try {
+                context.contentResolver.openOutputStream(uri)?.use { out ->
+                    out.write(pendingPdfContent!!)
                 }
-
-                Box {
-                    IconButton(
-                        onClick = { showExportMenu = true },
-                        modifier = Modifier.testTag("register_menu_button")
-                    ) {
-                        Icon(Icons.Default.Share, contentDescription = "Export")
-                    }
-                    DropdownMenu(
-                        expanded = showExportMenu,
-                        onDismissRequest = { showExportMenu = false }
-                    ) {
-                        DropdownMenuItem(
-                            text = { Text("Export to CSV") },
-                            onClick = {
-                                showExportMenu = false
-                                val sb = StringBuilder()
-                                sb.append("Roll,Name,").append(daysInMonth.joinToString(",") { "${it.first}" }).append(",Present,Absent,Rate%\n")
-                                students.forEach { s ->
-                                    var p = 0
-                                    var a = 0
-                                    val rowDays = daysInMonth.joinToString(",") { d ->
-                                        val rec = attendanceMap["${d.second}_${s.roll}"]
-                                        when (rec?.status) {
-                                            "PRESENT" -> { p++; "P" }
-                                            "ABSENT" -> { a++; "A" }
-                                            else -> if (holidays.contains(d.second) || d.third) "H" else "-"
-                                        }
-                                    }
-                                    val tot = p + a
-                                    val rate = if (tot > 0) "%.1f".format(p * 100f / tot) else "0"
-                                    sb.append("${s.roll},\"${s.name}\",$rowDays,$p,$a,$rate%\n")
-                                }
-                                val shareIntent = Intent(Intent.ACTION_SEND).apply {
-                                    type = "text/plain"
-                                    putExtra(Intent.EXTRA_SUBJECT, "ClassRoll Register - $monthPrefix")
-                                    putExtra(Intent.EXTRA_TEXT, sb.toString())
-                                }
-                                context.startActivity(Intent.createChooser(shareIntent, "Share CSV"))
-                            }
-                        )
-                        DropdownMenuItem(
-                            text = { Text("Copy Register as Text") },
-                            onClick = {
-                                showExportMenu = false
-                                val sb = StringBuilder("Register $monthPrefix ($currentYear)\n")
-                                students.forEach { s ->
-                                    val pCount = daysInMonth.count { d -> attendanceMap["${d.second}_${s.roll}"]?.status == "PRESENT" }
-                                    val aCount = daysInMonth.count { d -> attendanceMap["${d.second}_${s.roll}"]?.status == "ABSENT" }
-                                    sb.append("Roll ${s.roll}: ${s.name} - Present: $pCount, Absent: $aCount\n")
-                                }
-                                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                clipboard.setPrimaryClip(ClipData.newPlainText("Register Summary", sb.toString()))
-                                Toast.makeText(context, "Copied summary to clipboard", Toast.LENGTH_SHORT).show()
-                            }
-                        )
-                    }
-                }
+            } catch (e: Exception) {
+                e.printStackTrace()
             }
+        }
+    }
 
-            Spacer(modifier = Modifier.height(8.dp))
+    val filteredStudents = remember(students, searchQuery) {
+        if (searchQuery.isBlank()) students
+        else students.filter { 
+            it.name.contains(searchQuery, ignoreCase = true) || 
+            it.roll.contains(searchQuery, ignoreCase = true) 
+        }
+    }
 
-            // Register table
-            if (students.isEmpty()) {
-                Box(
-                    modifier = Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        "No students registered for $currentYear.\nTap '+' to add student or import from Excel/CSV.",
-                        textAlign = TextAlign.Center,
-                        color = MaterialTheme.colorScheme.outline
-                    )
-                }
-            } else {
-                val horizontalScroll = rememberScrollState()
-
-                Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .horizontalScroll(horizontalScroll)
-                ) {
-                    // Header row with dates
-                    Row(
-                        modifier = Modifier
-                            .background(MaterialTheme.colorScheme.surfaceVariant)
-                            .padding(vertical = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            "Roll",
-                            modifier = Modifier
-                                .width(46.dp)
-                                .padding(horizontal = 4.dp),
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 12.sp,
-                            textAlign = TextAlign.Center
-                        )
-                        Text(
-                            "Name",
-                            modifier = Modifier
-                                .width(130.dp)
-                                .padding(horizontal = 4.dp),
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 12.sp
-                        )
-
-                        daysInMonth.forEach { (day, dateStr, isWknd) ->
-                            val isHol = holidays.contains(dateStr)
-                            val headerBg = when {
-                                isHol -> Color(0xFFFFCC80)
-                                isWknd -> Color(0xFFEEEEEE)
-                                else -> Color.Transparent
-                            }
-                            Box(
-                                modifier = Modifier
-                                    .width(36.dp)
-                                    .height(34.dp)
-                                    .background(headerBg)
-                                    .clickable { holidayConfirmDate = dateStr },
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(
-                                    "$day",
-                                    fontSize = 11.sp,
-                                    fontWeight = if (isWknd || isHol) FontWeight.Bold else FontWeight.Medium,
-                                    color = if (isHol) Color(0xFFE65100) else Color.Unspecified
-                                )
-                            }
-                        }
-
-                        Text(
-                            "P",
-                            modifier = Modifier.width(36.dp),
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 12.sp,
-                            textAlign = TextAlign.Center,
-                            color = Color(0xFF2E7D32)
-                        )
-                        Text(
-                            "A",
-                            modifier = Modifier.width(36.dp),
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 12.sp,
-                            textAlign = TextAlign.Center,
-                            color = Color(0xFFC62828)
-                        )
-                        Text(
-                            "%",
-                            modifier = Modifier.width(44.dp),
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 12.sp,
-                            textAlign = TextAlign.Center
-                        )
-                    }
-
-                    HorizontalDivider()
-
-                    // Student rows
-                    LazyColumn(modifier = Modifier.fillMaxSize()) {
-                        items(students, key = { it.roll }) { student ->
-                            var presentCount = 0
-                            var absentCount = 0
-
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(vertical = 2.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                // Roll
-                                Text(
-                                    student.roll,
-                                    modifier = Modifier
-                                        .width(46.dp)
-                                        .padding(horizontal = 4.dp),
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 12.sp,
-                                    textAlign = TextAlign.Center
-                                )
-
-                                // Name with edit click
-                                Row(
-                                    modifier = Modifier
-                                        .width(130.dp)
-                                        .clickable {
-                                            editingStudentRoll = student.roll
-                                            editingStudentName = student.name
-                                            isNewStudent = false
-                                            showStudentDialog = true
-                                        }
-                                        .padding(horizontal = 4.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Text(
-                                        student.name,
-                                        fontSize = 12.sp,
-                                        maxLines = 1,
-                                        modifier = Modifier.weight(1f)
-                                    )
-                                }
-
-                                // Attendance day cells
-                                daysInMonth.forEach { (day, dateStr, isWknd) ->
-                                    val isHol = holidays.contains(dateStr)
-                                    val record = attendanceMap["${dateStr}_${student.roll}"]
-                                    val status = record?.status ?: ""
-                                    if (status == "PRESENT") presentCount++
-                                    if (status == "ABSENT") absentCount++
-
-                                    val cellBg = when {
-                                        status == "PRESENT" -> Color(0xFFC8E6C9)
-                                        status == "ABSENT" -> Color(0xFFFFCDD2)
-                                        isHol -> Color(0xFFFFF3E0)
-                                        isWknd -> Color(0xFFF5F5F5)
-                                        else -> Color.Transparent
-                                    }
-
-                                    Box(
-                                        modifier = Modifier
-                                            .width(36.dp)
-                                            .height(34.dp)
-                                            .padding(1.dp)
-                                            .background(cellBg, RoundedCornerShape(2.dp))
-                                            .clickable {
-                                                if (!isWknd && !isHol) {
-                                                    val nextStatus = when (status) {
-                                                        "PRESENT" -> "ABSENT"
-                                                        "ABSENT" -> ""
-                                                        else -> "PRESENT"
-                                                    }
-                                                    if (nextStatus.isEmpty()) {
-                                                        viewModel.deleteAttendanceRecord(date = dateStr, roll = student.roll)
-                                                    } else {
-                                                        viewModel.updateCell(roll = student.roll, status = nextStatus, date = dateStr)
-                                                    }
-                                                }
-                                            },
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Text(
-                                            text = when {
-                                                status == "PRESENT" -> "P"
-                                                status == "ABSENT" -> "A"
-                                                isHol -> "H"
-                                                isWknd -> "-"
-                                                else -> ""
-                                            },
-                                            fontSize = 11.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            color = when (status) {
-                                                "PRESENT" -> Color(0xFF1B5E20)
-                                                "ABSENT" -> Color(0xFFB71C1C)
-                                                else -> Color.Gray
-                                            }
-                                        )
-                                    }
-                                }
-
-                                // Total P
-                                Text(
-                                    "$presentCount",
-                                    modifier = Modifier.width(36.dp),
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    textAlign = TextAlign.Center,
-                                    color = Color(0xFF2E7D32)
-                                )
-
-                                // Total A
-                                Text(
-                                    "$absentCount",
-                                    modifier = Modifier.width(36.dp),
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    textAlign = TextAlign.Center,
-                                    color = Color(0xFFC62828)
-                                )
-
-                                // %
-                                val tot = presentCount + absentCount
-                                val pct = if (tot > 0) (presentCount * 100 / tot) else 0
-                                Text(
-                                    "$pct%",
-                                    modifier = Modifier.width(44.dp),
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    textAlign = TextAlign.Center
-                                )
-                            }
-                            HorizontalDivider()
-                        }
-                    }
-                }
-            }
+    // Get all dates in selected month
+    val daysInMonth = remember(selectedCalendar) {
+        val cal = selectedCalendar.clone() as Calendar
+        cal.set(Calendar.DAY_OF_MONTH, 1)
+        cal.getActualMaximum(Calendar.DAY_OF_MONTH)
+    }
+    val dates = remember(selectedCalendar, selectedMonthStr, daysInMonth) {
+        (1..daysInMonth).map { day ->
+            String.format(Locale.US, "%s-%02d", selectedMonthStr, day)
         }
     }
 
@@ -474,51 +162,42 @@ fun RegisterScreen(
     if (showStudentDialog) {
         AlertDialog(
             onDismissRequest = { showStudentDialog = false },
-            title = { Text(if (isNewStudent) "Add Student" else "Edit Student") },
+            title = { Text(if (editingStudentRoll.isNotBlank() && students.any { it.roll == editingStudentRoll }) "Edit Student" else "Add Student") },
             text = {
                 Column {
                     OutlinedTextField(
                         value = editingStudentRoll,
                         onValueChange = { editingStudentRoll = it },
                         label = { Text("Roll Number") },
-                        enabled = isNewStudent,
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth().testTag("student_roll_input")
+                        modifier = Modifier.fillMaxWidth()
                     )
-                    Spacer(modifier = Modifier.height(8.dp))
+                    Spacer(Modifier.height(8.dp))
                     OutlinedTextField(
                         value = editingStudentName,
                         onValueChange = { editingStudentName = it },
-                        label = { Text("Student Name") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth().testTag("student_name_input")
+                        label = { Text("Name") },
+                        modifier = Modifier.fillMaxWidth()
                     )
                 }
             },
             confirmButton = {
-                Button(
-                    onClick = {
-                        if (editingStudentRoll.isNotBlank() && editingStudentName.isNotBlank()) {
-                            viewModel.addOrUpdateStudent(editingStudentRoll.trim(), editingStudentName.trim())
-                            showStudentDialog = false
-                        }
-                    },
-                    modifier = Modifier.testTag("save_student_button")
-                ) {
+                TextButton(onClick = {
+                    if (editingStudentRoll.isNotBlank()) {
+                        viewModel.addOrUpdateStudent(editingStudentRoll, editingStudentName)
+                    }
+                    showStudentDialog = false
+                }) {
                     Text("Save")
                 }
             },
             dismissButton = {
                 Row {
-                    if (!isNewStudent) {
-                        TextButton(
-                            onClick = {
-                                viewModel.deleteStudent(editingStudentRoll)
-                                showStudentDialog = false
-                            },
-                            modifier = Modifier.testTag("delete_student_button")
-                        ) {
-                            Text("Delete", color = MaterialTheme.colorScheme.error)
+                    if (editingStudentRoll.isNotBlank() && students.any { it.roll == editingStudentRoll }) {
+                        TextButton(onClick = {
+                            viewModel.deleteStudent(editingStudentRoll)
+                            showStudentDialog = false
+                        }) {
+                            Text("Delete", color = Color.Red)
                         }
                     }
                     TextButton(onClick = { showStudentDialog = false }) {
@@ -529,22 +208,68 @@ fun RegisterScreen(
         )
     }
 
-    // Holiday toggle confirm
+    // Holiday Toggle Confirmation Dialog
     if (holidayConfirmDate != null) {
-        val date = holidayConfirmDate ?: ""
-        val isAlreadyHoliday = holidays.contains(date)
+        val confirmDate = holidayConfirmDate!!
+        val activeStudents = remember(students) { students.filter { it.name.isNotBlank() } }
+        val presentCount = activeStudents.count { attendanceMap[it.roll]?.get(confirmDate)?.status == "P" }
+        val absentCount = activeStudents.count { attendanceMap[it.roll]?.get(confirmDate)?.status == "A" }
+        val isAlreadyHoliday = holidays.contains(confirmDate)
+
         AlertDialog(
             onDismissRequest = { holidayConfirmDate = null },
-            title = { Text(if (isAlreadyHoliday) "Remove Holiday?" else "Mark as Holiday?") },
+            icon = {
+                Icon(
+                    imageVector = Icons.Default.Warning,
+                    contentDescription = "Confirmation Warning",
+                    tint = MaterialTheme.colorScheme.tertiary
+                )
+            },
+            title = {
+                Text(
+                    text = if (isAlreadyHoliday) "Clear Holiday Status?" else "Mark as Holiday (Off Day)?",
+                    style = MaterialTheme.typography.titleMedium
+                )
+            },
             text = {
-                Text("Do you want to ${if (isAlreadyHoliday) "remove holiday status from" else "mark"} $date ${if (isAlreadyHoliday) "" else "as a non-working day"}?")
+                Column {
+                    Text(
+                        text = "Date: ${formatFullDisplayDate(confirmDate)}",
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    if (!isAlreadyHoliday && (presentCount > 0 || absentCount > 0)) {
+                        Text(
+                            text = "⚠️ Attendance has already been taken on this day ($presentCount Present, $absentCount Absent).\n\nMarking it as a Holiday will display 'OFF' in the monthly register column.\n\n(Don't worry: your attendance records are safely kept and you will have 5 seconds to Undo).",
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    } else if (!isAlreadyHoliday) {
+                        Text(
+                            text = "This will mark this day as a School Holiday (OFF) in the monthly register. You will have 5 seconds to undo.",
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    } else {
+                        Text(
+                            text = "This will re-open this day as a regular school day in the register. Any previously recorded attendance will be shown.",
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    }
+                }
             },
             confirmButton = {
-                Button(onClick = {
-                    viewModel.toggleHoliday(date)
-                    holidayConfirmDate = null
-                }) {
-                    Text(if (isAlreadyHoliday) "Remove Holiday" else "Mark Holiday")
+                Button(
+                    onClick = {
+                        val wasHoliday = isAlreadyHoliday
+                        holidayConfirmDate = null
+                        summaryDate = null
+                        triggerHolidayToggleWithUndo(confirmDate, wasHoliday)
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (isAlreadyHoliday) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.tertiary
+                    )
+                ) {
+                    Text(if (isAlreadyHoliday) "Clear Holiday" else "Yes, Mark Holiday")
                 }
             },
             dismissButton = {
@@ -554,4 +279,650 @@ fun RegisterScreen(
             }
         )
     }
+
+    // Date Press-and-Hold Summary Dialog
+    if (summaryDate != null && holidayConfirmDate == null) {
+        val selDate = summaryDate!!
+        val isCustomHoliday = holidays.contains(selDate)
+        val isWeekendDay = isWeekend(selDate)
+        val activeStudents = remember(students) { students.filter { it.name.isNotBlank() } }
+        val totalStudents = activeStudents.size
+        
+        val presentList = remember(activeStudents, attendanceMap, selDate) {
+            activeStudents.filter { attendanceMap[it.roll]?.get(selDate)?.status == "P" }
+        }
+        val absentList = remember(activeStudents, attendanceMap, selDate) {
+            activeStudents.filter { attendanceMap[it.roll]?.get(selDate)?.status == "A" }
+        }
+        val unmarkedCount = (totalStudents - presentList.size - absentList.size).coerceAtLeast(0)
+
+        AlertDialog(
+            onDismissRequest = { summaryDate = null },
+            title = {
+                Column {
+                    Text(
+                        text = formatFullDisplayDate(selDate),
+                        style = MaterialTheme.typography.titleMedium
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = when {
+                            isCustomHoliday -> MaterialTheme.colorScheme.tertiaryContainer
+                            isWeekendDay -> MaterialTheme.colorScheme.secondaryContainer
+                            else -> MaterialTheme.colorScheme.surfaceVariant
+                        }
+                    ) {
+                        Text(
+                            text = when {
+                                isCustomHoliday -> "🌴 School Holiday (Off Day)"
+                                isWeekendDay -> "📅 Weekend (Friday / Saturday - Fixed Off)"
+                                else -> "📖 Regular School Day"
+                            },
+                            style = MaterialTheme.typography.labelMedium,
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                            color = when {
+                                isCustomHoliday -> MaterialTheme.colorScheme.onTertiaryContainer
+                                isWeekendDay -> MaterialTheme.colorScheme.onSecondaryContainer
+                                else -> MaterialTheme.colorScheme.onSurfaceVariant
+                            }
+                        )
+                    }
+                }
+            },
+            text = {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    // Summary Metrics Card
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceEvenly
+                            ) {
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Text("Present", style = MaterialTheme.typography.labelSmall, color = Color(0xFF2E7D32))
+                                    Text("${presentList.size}", style = MaterialTheme.typography.titleMedium, color = Color(0xFF2E7D32))
+                                }
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Text("Absent", style = MaterialTheme.typography.labelSmall, color = Color(0xFFC62828))
+                                    Text("${absentList.size}", style = MaterialTheme.typography.titleMedium, color = Color(0xFFC62828))
+                                }
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Text("Unmarked", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
+                                    Text("$unmarkedCount", style = MaterialTheme.typography.titleMedium)
+                                }
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Text("Total", style = MaterialTheme.typography.labelSmall)
+                                    Text("$totalStudents", style = MaterialTheme.typography.titleMedium)
+                                }
+                            }
+                            if (totalStudents > 0 && (presentList.isNotEmpty() || absentList.isNotEmpty())) {
+                                Spacer(Modifier.height(8.dp))
+                                val presentRatio = presentList.size.toFloat() / totalStudents.toFloat()
+                                val presentPct = (presentRatio * 100).toInt()
+                                LinearProgressIndicator(
+                                    progress = { presentRatio },
+                                    modifier = Modifier.fillMaxWidth().height(6.dp),
+                                    color = Color(0xFF2E7D32),
+                                    trackColor = Color(0xFFFFCDD2)
+                                )
+                                Spacer(Modifier.height(4.dp))
+                                Text(
+                                    text = "$presentPct% Present Rate",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    modifier = Modifier.align(Alignment.End),
+                                    color = Color(0xFF2E7D32)
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(Modifier.height(12.dp))
+
+                    // Absent Students List
+                    if (absentList.isNotEmpty()) {
+                        Text(
+                            text = "Absent Students (${absentList.size}):",
+                            style = MaterialTheme.typography.titleSmall,
+                            color = Color(0xFFC62828)
+                        )
+                        Spacer(Modifier.height(6.dp))
+                        LazyColumn(modifier = Modifier.fillMaxWidth().heightIn(max = 180.dp)) {
+                            items(absentList, key = { it.roll }) { student ->
+                                Surface(
+                                    modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+                                    color = Color(0xFFFFEBEE),
+                                    shape = RoundedCornerShape(8.dp)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = "Roll #${student.roll}  ${student.name}",
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = Color(0xFFC62828)
+                                        )
+                                        Text(
+                                            text = "Absent",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = Color(0xFFC62828)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    } else if (presentList.size == totalStudents && totalStudents > 0) {
+                        Surface(
+                            color = Color(0xFFE8F5E9),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                text = "🎉 100% Attendance! All students were present.",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = Color(0xFF2E7D32),
+                                modifier = Modifier.padding(12.dp),
+                                textAlign = TextAlign.Center
+                            )
+                        }
+                    } else if (presentList.isEmpty() && absentList.isEmpty()) {
+                        Text(
+                            text = if (isCustomHoliday || isWeekendDay) "School was off on this day." else "No attendance recorded for this date yet.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.outline
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    if (!isWeekendDay) {
+                        OutlinedButton(onClick = {
+                            holidayConfirmDate = selDate
+                        }) {
+                            Text(if (isCustomHoliday) "Clear Holiday" else "🌴 Toggle Holiday")
+                        }
+                    }
+                    TextButton(onClick = { summaryDate = null }) {
+                        Text("Close")
+                    }
+                }
+            }
+        )
+    }
+
+    val horizontalScrollState = rememberScrollState()
+
+    Scaffold(
+        floatingActionButton = {
+            FloatingActionButton(onClick = { 
+                editingStudentRoll = ""
+                editingStudentName = ""
+                showStudentDialog = true 
+            }) {
+                Text("+")
+            }
+        }
+    ) { innerPadding ->
+        Box(
+            Modifier
+                .fillMaxSize()
+                .padding(innerPadding)
+        ) {
+            Column(Modifier.fillMaxSize()) {
+                // Top Bar with Navigation & Export
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    IconButton(onClick = {
+                        val cal = selectedCalendar.clone() as Calendar
+                        cal.add(Calendar.MONTH, -1)
+                        selectedCalendar = cal
+                    }) {
+                        Icon(Icons.Default.ArrowBack, contentDescription = "Previous Month")
+                    }
+
+                    Text("Register: $selectedMonthTitle", style = MaterialTheme.typography.titleLarge)
+
+                    Row {
+                        Box {
+                            IconButton(onClick = { showExportMenu = true }) {
+                                Icon(Icons.Default.Share, contentDescription = "Export")
+                            }
+                            DropdownMenu(
+                                expanded = showExportMenu,
+                                onDismissRequest = { showExportMenu = false }
+                            ) {
+                                DropdownMenuItem(
+                                    text = { Text("Download Monthly Register (CSV)") },
+                                    onClick = {
+                                        showExportMenu = false
+                                        val header = "Roll,Name," + dates.joinToString(",") { it.substringAfterLast("-") }
+                                        val rows = filteredStudents.map { student ->
+                                            val attValues = dates.joinToString(",") { date ->
+                                                attendanceMap[student.roll]?.get(date)?.status ?: ""
+                                            }
+                                            "${student.roll},\"${student.name.replace("\"", "\"\"")}\",$attValues"
+                                        }
+                                        val csvContent = (listOf(header) + rows).joinToString("\n")
+                                        pendingCsvContent = csvContent
+                                        saveCsvLauncher.launch("register_${selectedMonthStr}.csv")
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Download Summary Report (CSV)") },
+                                    onClick = {
+                                        showExportMenu = false
+                                        val workingDays = dates.count { !isWeekend(it) && !holidays.contains(it) && it <= todayStr }
+                                        val header = "Roll,Name,Present,Absent,Percentage\n"
+                                        val rows = filteredStudents.joinToString("\n") { student ->
+                                            val present = dates.count { attendanceMap[student.roll]?.get(it)?.status == "P" }
+                                            val absent = dates.count { attendanceMap[student.roll]?.get(it)?.status == "A" }
+                                            val pct = if (workingDays > 0) Math.round(present * 100f / workingDays) else 0
+                                            "${student.roll},\"${student.name.replace("\"", "\"\"")}\",$present,$absent,$pct%"
+                                        }
+                                        pendingCsvContent = header + rows
+                                        saveCsvLauncher.launch("summary_${selectedMonthStr}.csv")
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Download Summary Report (PDF)") },
+                                    onClick = {
+                                        showExportMenu = false
+                                        pendingPdfContent = generateSummaryPdf(selectedMonthTitle, filteredStudents, attendanceMap, dates, holidays)
+                                        savePdfLauncher.launch("summary_${selectedMonthStr}.pdf")
+                                    }
+                                )
+                            }
+                        }
+                        IconButton(onClick = {
+                            val cal = selectedCalendar.clone() as Calendar
+                            cal.add(Calendar.MONTH, 1)
+                            selectedCalendar = cal
+                        }) {
+                            Icon(Icons.Default.ArrowForward, contentDescription = "Next Month")
+                        }
+                    }
+                }
+
+                // Search Bar
+                OutlinedTextField(
+                    value = searchQuery,
+                    onValueChange = { searchQuery = it },
+                    placeholder = { Text("Search by name or roll...") },
+                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = "Search") },
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
+                    singleLine = true
+                )
+
+                // Hint row
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 14.dp, vertical = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Info,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(15.dp)
+                    )
+                    Spacer(Modifier.width(4.dp))
+                    Text(
+                        text = "Fri & Sat are fixed weekends. Press & hold date header for summary & holiday.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                
+                if (filteredStudents.isEmpty()) {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Text("No matching students found.")
+                    }
+                } else {
+                    Column(Modifier.weight(1f)) {
+                        // Header Row (Sticky Roll/Name Header + Scrollable Dates)
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .height(52.dp)
+                        ) {
+                            Box(
+                                Modifier
+                                    .width(130.dp)
+                                    .fillMaxHeight()
+                                    .background(MaterialTheme.colorScheme.surfaceVariant)
+                                    .border(1.dp, Color.Gray),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text("Roll / Name", style = MaterialTheme.typography.labelSmall)
+                            }
+
+                            Row(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .fillMaxHeight()
+                                    .horizontalScroll(horizontalScrollState)
+                                    .background(MaterialTheme.colorScheme.surfaceVariant)
+                            ) {
+                                dates.forEach { date ->
+                                    val dayStr = date.substringAfterLast("-")
+                                    val dayOfWeek = getDayOfWeekShort(date)
+                                    val isWeekendDay = isWeekend(date)
+                                    val isCustomHoliday = holidays.contains(date)
+
+                                    val headerBg = when {
+                                        isCustomHoliday -> MaterialTheme.colorScheme.tertiaryContainer
+                                        isWeekendDay -> MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.85f)
+                                        else -> MaterialTheme.colorScheme.surfaceVariant
+                                    }
+
+                                    Box(
+                                        Modifier
+                                            .width(48.dp)
+                                            .fillMaxHeight()
+                                            .background(headerBg)
+                                            .border(1.dp, Color.Gray)
+                                            .pointerInput(date) {
+                                                detectTapGestures(
+                                                    onTap = { summaryDate = date },
+                                                    onLongPress = { summaryDate = date }
+                                                )
+                                            },
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                            Text(
+                                                dayStr,
+                                                style = MaterialTheme.typography.labelSmall,
+                                                fontWeight = if (isWeekendDay || isCustomHoliday) FontWeight.Bold else FontWeight.Normal
+                                            )
+                                            Text(
+                                                text = if (isCustomHoliday) "Off" else dayOfWeek,
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = when {
+                                                    isCustomHoliday -> MaterialTheme.colorScheme.onTertiaryContainer
+                                                    isWeekendDay -> MaterialTheme.colorScheme.onSecondaryContainer
+                                                    else -> Color.Gray
+                                                }
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // LazyColumn for Student Rows
+                        LazyColumn(Modifier.fillMaxWidth().weight(1f)) {
+                            items(filteredStudents, key = { it.roll }) { student ->
+                                Row(
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .height(48.dp)
+                                ) {
+                                    // Sticky Left Student Roll/Name Cell
+                                    Box(
+                                        Modifier
+                                            .width(130.dp)
+                                            .fillMaxHeight()
+                                            .border(1.dp, Color.Gray)
+                                            .padding(4.dp)
+                                            .clickable {
+                                                editingStudentRoll = student.roll
+                                                editingStudentName = student.name
+                                                showStudentDialog = true
+                                            },
+                                        contentAlignment = Alignment.CenterStart
+                                    ) {
+                                        Text(
+                                            "${student.roll} ${student.name}",
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                            style = MaterialTheme.typography.bodySmall
+                                        )
+                                    }
+
+                                    // Attendance Cells Row
+                                    Row(
+                                        Modifier
+                                            .fillMaxWidth()
+                                            .fillMaxHeight()
+                                            .horizontalScroll(horizontalScrollState)
+                                    ) {
+                                        dates.forEach { date ->
+                                            val record = attendanceMap[student.roll]?.get(date)
+                                            val status = record?.status ?: ""
+                                            val isWeekendDay = isWeekend(date)
+                                            val isCustomHoliday = holidays.contains(date)
+
+                                            // Styling for cell
+                                            val cellColor = when {
+                                                isWeekendDay -> MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.35f)
+                                                isCustomHoliday -> MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.35f)
+                                                status == "P" -> Color(0xFFC8E6C9)
+                                                status == "A" -> Color(0xFFFFCDD2)
+                                                else -> Color.Transparent
+                                            }
+
+                                            val displayText = when {
+                                                isWeekendDay -> "W"
+                                                isCustomHoliday -> "OFF"
+                                                status.isNotBlank() -> status
+                                                else -> ""
+                                            }
+
+                                            val textColor = when {
+                                                isWeekendDay -> MaterialTheme.colorScheme.outline
+                                                isCustomHoliday -> MaterialTheme.colorScheme.tertiary
+                                                status == "P" -> Color(0xFF1B5E20)
+                                                status == "A" -> Color(0xFFB71C1C)
+                                                else -> MaterialTheme.colorScheme.onSurface
+                                            }
+
+                                            // Weekend & Custom Holidays are locked/non-editable by tapping the cell
+                                            val isCellEditable = !isWeekendDay && !isCustomHoliday
+
+                                            Box(
+                                                Modifier
+                                                    .width(48.dp)
+                                                    .fillMaxHeight()
+                                                    .background(cellColor)
+                                                    .border(1.dp, Color.Gray.copy(alpha = 0.6f))
+                                                    .then(
+                                                        if (isCellEditable) {
+                                                            Modifier.clickable {
+                                                                val nextStatus = when (status) {
+                                                                    "" -> "P"
+                                                                    "P" -> "A"
+                                                                    else -> ""
+                                                                }
+                                                                if (nextStatus.isEmpty()) {
+                                                                    viewModel.deleteAttendanceRecord(date, student.roll)
+                                                                } else {
+                                                                    viewModel.updateCell(date, student.roll, nextStatus)
+                                                                }
+                                                            }
+                                                        } else {
+                                                            Modifier
+                                                        }
+                                                    ),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Text(
+                                                    text = displayText,
+                                                    textAlign = TextAlign.Center,
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    fontWeight = if (isWeekendDay || isCustomHoliday) FontWeight.SemiBold else FontWeight.Normal,
+                                                    color = textColor
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 5-Second Animated Undo Floating Banner
+            AnimatedVisibility(
+                visible = undoDate != null,
+                enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
+                exit = slideOutVertically(targetOffsetY = { it }) + fadeOut(),
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 72.dp, start = 16.dp, end = 16.dp)
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(16.dp),
+                    color = MaterialTheme.colorScheme.inverseSurface,
+                    shadowElevation = 8.dp,
+                    modifier = Modifier.fillMaxWidth().wrapContentHeight()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = undoMessage,
+                                color = MaterialTheme.colorScheme.inverseOnSurface,
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.Medium
+                            )
+                            Text(
+                                text = "Auto-closing in ${undoRemainingSeconds}s...",
+                                color = MaterialTheme.colorScheme.inverseOnSurface.copy(alpha = 0.7f),
+                                style = MaterialTheme.typography.labelSmall
+                            )
+                        }
+
+                        Button(
+                            onClick = {
+                                val targetDate = undoDate
+                                if (targetDate != null) {
+                                    viewModel.toggleHoliday(targetDate)
+                                    undoDate = null
+                                    undoMessage = ""
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.inversePrimary,
+                                contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                            ),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Refresh,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(Modifier.width(4.dp))
+                            Text("UNDO (${undoRemainingSeconds}s)", fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun isWeekend(dateStr: String): Boolean {
+    return try {
+        val date = SimpleDateFormat("yyyy-MM-dd", Locale.US).parse(dateStr) ?: return false
+        val cal = Calendar.getInstance().apply { time = date }
+        val dayOfWeek = cal.get(Calendar.DAY_OF_WEEK)
+        dayOfWeek == Calendar.FRIDAY || dayOfWeek == Calendar.SATURDAY
+    } catch (e: Exception) {
+        false
+    }
+}
+
+private fun getDayOfWeekShort(dateStr: String): String {
+    return try {
+        val date = SimpleDateFormat("yyyy-MM-dd", Locale.US).parse(dateStr) ?: return ""
+        SimpleDateFormat("EEE", Locale.US).format(date)
+    } catch (e: Exception) {
+        ""
+    }
+}
+
+private fun formatFullDisplayDate(dateStr: String): String {
+    return try {
+        val date = SimpleDateFormat("yyyy-MM-dd", Locale.US).parse(dateStr) ?: return dateStr
+        SimpleDateFormat("EEEE, dd MMMM yyyy", Locale.US).format(date)
+    } catch (e: Exception) {
+        dateStr
+    }
+}
+
+private fun generateSummaryPdf(
+    monthTitle: String,
+    students: List<com.aistudio.classroll.jkmxlp.data.StudentEntity>,
+    attendanceMap: Map<String, Map<String, com.aistudio.classroll.jkmxlp.data.AttendanceRecordEntity>>,
+    dates: List<String>,
+    holidays: Set<String>
+): ByteArray {
+    val pdfDocument = android.graphics.pdf.PdfDocument()
+    var pageInfo = android.graphics.pdf.PdfDocument.PageInfo.Builder(595, 842, 1).create()
+    var page = pdfDocument.startPage(pageInfo)
+    var canvas = page.canvas
+    val paint = android.graphics.Paint()
+
+    paint.textSize = 18f
+    paint.isFakeBoldText = true
+    canvas.drawText("Attendance Summary - $monthTitle", 50f, 50f, paint)
+
+    paint.textSize = 12f
+    paint.isFakeBoldText = true
+    canvas.drawText("Roll", 50f, 100f, paint)
+    canvas.drawText("Name", 120f, 100f, paint)
+    canvas.drawText("Present", 350f, 100f, paint)
+    canvas.drawText("Absent", 420f, 100f, paint)
+    canvas.drawText("Percentage", 490f, 100f, paint)
+
+    paint.isFakeBoldText = false
+    var y = 130f
+    val todayStr = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
+    val workingDays = dates.count { !isWeekend(it) && !holidays.contains(it) && it <= todayStr }
+
+    var pageNumber = 1
+    for (student in students) {
+        if (y > 800f) {
+            pdfDocument.finishPage(page)
+            pageNumber++
+            pageInfo = android.graphics.pdf.PdfDocument.PageInfo.Builder(595, 842, pageNumber).create()
+            page = pdfDocument.startPage(pageInfo)
+            canvas = page.canvas
+            y = 50f
+        }
+        val present = dates.count { attendanceMap[student.roll]?.get(it)?.status == "P" }
+        val absent = dates.count { attendanceMap[student.roll]?.get(it)?.status == "A" }
+        val pct = if (workingDays > 0) Math.round(present * 100f / workingDays) else 0
+
+        canvas.drawText(student.roll, 50f, y, paint)
+        canvas.drawText(student.name, 120f, y, paint)
+        canvas.drawText(present.toString(), 350f, y, paint)
+        canvas.drawText(absent.toString(), 420f, y, paint)
+        canvas.drawText("$pct%", 490f, y, paint)
+        y += 20f
+    }
+
+    pdfDocument.finishPage(page)
+    val outputStream = java.io.ByteArrayOutputStream()
+    pdfDocument.writeTo(outputStream)
+    pdfDocument.close()
+    return outputStream.toByteArray()
 }

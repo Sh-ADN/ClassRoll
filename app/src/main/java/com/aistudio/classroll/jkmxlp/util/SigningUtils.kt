@@ -1,35 +1,35 @@
 package com.aistudio.classroll.jkmxlp.util
 
 import android.content.Context
-import android.content.pm.PackageInfo
 import android.content.pm.PackageManager
-import android.content.pm.Signature
 import android.os.Build
 import java.security.MessageDigest
 
 object SigningUtils {
     fun getSha1Fingerprint(context: Context): String {
         return try {
-            val packageInfo: PackageInfo = if (Build.VERSION.SDK_INT >= 28) {
-                context.packageManager.getPackageInfo(context.packageName, PackageManager.GET_SIGNING_CERTIFICATES)
+            val packageInfo = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                context.packageManager.getPackageInfo(
+                    context.packageName,
+                    PackageManager.GET_SIGNING_CERTIFICATES
+                )
             } else {
                 @Suppress("DEPRECATION")
-                context.packageManager.getPackageInfo(context.packageName, PackageManager.GET_SIGNATURES)
+                context.packageManager.getPackageInfo(
+                    context.packageName,
+                    PackageManager.GET_SIGNATURES
+                )
             }
-            val signatures: Array<Signature>? = if (Build.VERSION.SDK_INT >= 28) {
+            val signatures = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                 packageInfo.signingInfo?.apkContentsSigners
             } else {
                 @Suppress("DEPRECATION")
                 packageInfo.signatures
             }
-            val signature = signatures?.firstOrNull()
-            if (signature != null) {
-                val md = MessageDigest.getInstance("SHA-1")
-                val digest = md.digest(signature.toByteArray())
-                digest.joinToString(":") { "%02X".format(it) }
-            } else {
-                "Not available"
-            }
+            val cert = signatures?.firstOrNull()?.toByteArray() ?: return "Not available"
+            val md = MessageDigest.getInstance("SHA-1")
+            val digest = md.digest(cert)
+            digest.joinToString(":") { "%02X".format(it) }
         } catch (e: Exception) {
             "Unavailable: ${e.message}"
         }
@@ -37,26 +37,28 @@ object SigningUtils {
 
     fun getSha256Fingerprint(context: Context): String {
         return try {
-            val packageInfo: PackageInfo = if (Build.VERSION.SDK_INT >= 28) {
-                context.packageManager.getPackageInfo(context.packageName, PackageManager.GET_SIGNING_CERTIFICATES)
+            val packageInfo = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                context.packageManager.getPackageInfo(
+                    context.packageName,
+                    PackageManager.GET_SIGNING_CERTIFICATES
+                )
             } else {
                 @Suppress("DEPRECATION")
-                context.packageManager.getPackageInfo(context.packageName, PackageManager.GET_SIGNATURES)
+                context.packageManager.getPackageInfo(
+                    context.packageName,
+                    PackageManager.GET_SIGNATURES
+                )
             }
-            val signatures: Array<Signature>? = if (Build.VERSION.SDK_INT >= 28) {
+            val signatures = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                 packageInfo.signingInfo?.apkContentsSigners
             } else {
                 @Suppress("DEPRECATION")
                 packageInfo.signatures
             }
-            val signature = signatures?.firstOrNull()
-            if (signature != null) {
-                val md = MessageDigest.getInstance("SHA-256")
-                val digest = md.digest(signature.toByteArray())
-                digest.joinToString(":") { "%02X".format(it) }
-            } else {
-                "Not available"
-            }
+            val cert = signatures?.firstOrNull()?.toByteArray() ?: return "Not available"
+            val md = MessageDigest.getInstance("SHA-256")
+            val digest = md.digest(cert)
+            digest.joinToString(":") { "%02X".format(it) }
         } catch (e: Exception) {
             "Unavailable: ${e.message}"
         }

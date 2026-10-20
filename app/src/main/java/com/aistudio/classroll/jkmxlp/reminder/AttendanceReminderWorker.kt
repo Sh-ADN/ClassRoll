@@ -1,18 +1,19 @@
 package com.aistudio.classroll.jkmxlp.reminder
 
-import android.app.Notification
+import android.Manifest
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Build
 import androidx.core.app.ActivityCompat
 import androidx.core.app.NotificationCompat
 import androidx.room.Room
 import androidx.work.CoroutineWorker
 import androidx.work.ExistingWorkPolicy
-import androidx.work.OneTimeWorkRequest
+import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import com.aistudio.classroll.jkmxlp.MainActivity
@@ -29,6 +30,10 @@ const val REMINDER_WORK_NAME = "attendance_reminder"
 private const val CHANNEL_ID = "attendance_reminder_channel"
 private const val NOTIFICATION_ID = 1001
 
+// Checks once a day whether today's attendance has been recorded yet, and
+// shows a notification if not. Reschedules itself for the same time
+// tomorrow every time it runs, so it keeps going without needing an exact
+// alarm or any extra permission beyond POST_NOTIFICATIONS.
 class AttendanceReminderWorker(
     context: Context,
     params: WorkerParameters
@@ -37,44 +42,50 @@ class AttendanceReminderWorker(
     override suspend fun doWork(): Result {
         val settingsRepo = SettingsRepository(applicationContext)
         val enabled = settingsRepo.reminderEnabledFlow.first()
+
         if (!enabled) {
+            // Reminder was turned off since this was scheduled -- stop the chain.
             return Result.success()
         }
 
         val year = settingsRepo.academicYearFlow.first()
         val today = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
-        val cal = Calendar.getInstance()
-        val dayOfWeek = cal.get(Calendar.DAY_OF_WEEK)
-        val isWeekend = dayOfWeek == Calendar.SUNDAY || dayOfWeek == Calendar.FRIDAY // or Saturday
-        val holidays = settingsRepo.holidaysFlow.first()
-        val isHoliday = holidays.contains(today)
 
-        if (!isWeekend && !isHoliday) {
+        // No reminder on weekends (Friday and Saturday, as in the rest of the app)
+        // or on days you have marked as a holiday.
+        val dayOfWeek = Calendar.getInstance().get(Calendar.DAY_OF_WEEK)
+        val isWeekend = dayOfWeek == Calendar.FRIDAY || dayOfWeek == Calendar.SATURDAY
+        val isHoliday = settingsRepo.holidaysFlow.first().contains(today)
+
+        if (year.isNotBlank() && !isWeekend && !isHoliday) {
             try {
+                // No destructive-migration fallback here: a background job must never
+                // be able to wipe the database if the schema ever changes.
                 val db = Room.databaseBuilder(applicationContext, AppDatabase::class.java, "classroll_db")
-                    .fallbackToDestructiveMigration()
                     .build()
-                val count = db.classRollDao().countAttendanceForDate(year, today)
-                db.close()
-
-                if (count == 0) {
-                    showNotification()
+                try {
+                    val count = db.classRollDao().countAttendanceForDate(year, today)
+                    if (count == 0) {
+                        showNotification()
+                    }
+                } finally {
+                    db.close()
                 }
             } catch (e: Exception) {
-                // Ignore DB error
+                // Could not read the data this time. Skip today's reminder, but keep
+                // the daily schedule going (below) instead of stopping it for good.
             }
         }
 
-        // Reschedule next
-        val time = settingsRepo.reminderTimeFlow.first()
-        scheduleNext(applicationContext, time)
-
+        // Queue tomorrow's check regardless, so the reminder keeps recurring.
+        scheduleNext(applicationContext, settingsRepo.reminderTimeFlow.first())
         return Result.success()
     }
 
     private fun showNotification() {
         val context = applicationContext
         val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 CHANNEL_ID,
@@ -88,13 +99,11 @@ class AttendanceReminderWorker(
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
         }
         val pendingIntent = PendingIntent.getActivity(
-            context,
-            0,
-            openAppIntent,
+            context, 0, openAppIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        val notification: Notification = NotificationCompat.Builder(context, CHANNEL_ID)
+        val notification = NotificationCompat.Builder(context, CHANNEL_ID)
             .setContentTitle("Attendance not taken yet")
             .setContentText("Today's attendance hasn't been recorded. Tap to open ClassRoll.")
             .setSmallIcon(android.R.drawable.ic_menu_agenda)
@@ -103,16 +112,21 @@ class AttendanceReminderWorker(
             .build()
 
         val hasPermission = Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
-                ActivityCompat.checkSelfPermission(context, android.Manifest.permission.POST_NOTIFICATIONS) == 0
+            ActivityCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) ==
+            PackageManager.PERMISSION_GRANTED
+
         if (hasPermission) {
             nm.notify(NOTIFICATION_ID, notification)
         }
     }
 
     companion object {
+        // Call this whenever the reminder is turned on, or its time is changed.
+        // Safe to call repeatedly -- REPLACE policy means it always reflects
+        // the latest settings instead of stacking up duplicate schedules.
         fun scheduleNext(context: Context, time: String) {
             val delay = millisUntilNext(time)
-            val request = OneTimeWorkRequest.Builder(AttendanceReminderWorker::class.java)
+            val request = OneTimeWorkRequestBuilder<AttendanceReminderWorker>()
                 .setInitialDelay(delay, TimeUnit.MILLISECONDS)
                 .build()
             WorkManager.getInstance(context).enqueueUniqueWork(

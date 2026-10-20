@@ -1,8 +1,7 @@
 package com.aistudio.classroll.jkmxlp.data
 
 import android.util.Log
-import com.google.firebase.Firebase
-import com.google.firebase.auth.auth
+import com.google.firebase.auth.FirebaseAuth
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -12,17 +11,17 @@ enum class OperationType(val value: String) {
     DELETE("delete"),
     LIST("list"),
     GET("get"),
-    WRITE("write")
+    WRITE("write"),
 }
 
 fun handleFirestoreError(exception: Exception, operationType: OperationType, path: String?): String {
-    val auth = Firebase.auth
+    val auth = FirebaseAuth.getInstance()
     val currentUser = auth.currentUser
 
-    val providerInfoList = currentUser?.providerData?.map { userInfo ->
+    val providerInfoList = currentUser?.providerData?.map { provider ->
         JSONObject().apply {
-            put("providerId", userInfo.providerId)
-            put("email", userInfo.email)
+            put("providerId", provider.providerId)
+            put("email", provider.email)
         }
     } ?: emptyList()
 

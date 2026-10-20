@@ -16,5 +16,5 @@ data class AttendanceRecordEntity(
     val date: String,
     val roll: String,
     val status: String,
-    val isSynced: Boolean = false
+    val isSynced: Boolean = true
 )

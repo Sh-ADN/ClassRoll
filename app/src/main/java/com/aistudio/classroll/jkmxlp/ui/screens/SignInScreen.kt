@@ -1,70 +1,46 @@
 package com.aistudio.classroll.jkmxlp.ui.screens
 
 import android.app.Activity
-import android.content.ClipData
-import android.content.ClipboardManager
-import android.content.Context
-import android.widget.Toast
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.CloudDone
-import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material.icons.filled.OfflinePin
-import androidx.compose.material.icons.filled.School
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
+import androidx.compose.material.icons.filled.AccountBox
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Done
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.aistudio.classroll.jkmxlp.data.AuthManager
-import com.aistudio.classroll.jkmxlp.util.SigningUtils
 import com.google.firebase.auth.FirebaseUser
 
 @Composable
 fun SignInScreen(
     authManager: AuthManager,
-    onSignInSuccess: (FirebaseUser) -> Unit,
-    onContinueOffline: () -> Unit
+    onAuthSuccess: (FirebaseUser) -> Unit,
+    onContinueOffline: (() -> Unit)? = null
 ) {
     val context = LocalContext.current
-    val scope = rememberCoroutineScope()
+    val coroutineScope = rememberCoroutineScope()
     var isLoading by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
+
     var showDiagnosticsDialog by remember { mutableStateOf(false) }
+    val clipboardManager = androidx.compose.ui.platform.LocalClipboardManager.current
+
+    LaunchedEffect(Unit) {
+        authManager.attemptAutoSignIn(
+            scope = coroutineScope,
+            onSuccess = onAuthSuccess,
+            onUnauthenticated = { /* user will click button */ }
+        )
+    }
 
     Scaffold { innerPadding ->
         Box(
@@ -77,24 +53,35 @@ fun SignInScreen(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .verticalScroll(rememberScrollState()),
+                    .widthIn(max = 480.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center
             ) {
-                Icon(
-                    imageVector = Icons.Default.School,
-                    contentDescription = "ClassRoll App",
-                    modifier = Modifier.size(72.dp),
-                    tint = MaterialTheme.colorScheme.primary
-                )
-                Spacer(modifier = Modifier.height(16.dp))
+                Surface(
+                    shape = MaterialTheme.shapes.extraLarge,
+                    color = MaterialTheme.colorScheme.primaryContainer,
+                    modifier = Modifier.size(96.dp)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            Icons.Default.Star,
+                            contentDescription = "ClassRoll App Icon",
+                            tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                            modifier = Modifier.size(54.dp)
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(24.dp))
 
                 Text(
                     text = "Welcome to ClassRoll",
                     style = MaterialTheme.typography.headlineMedium,
                     fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface,
                     textAlign = TextAlign.Center
                 )
+
                 Spacer(modifier = Modifier.height(8.dp))
 
                 Text(
@@ -103,105 +90,130 @@ fun SignInScreen(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.Center
                 )
+
                 Spacer(modifier = Modifier.height(32.dp))
 
                 Card(
                     modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-                    )
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
                 ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        FeatureRow(
-                            icon = Icons.Default.CloudDone,
-                            title = "Cloud Sync & Backup",
-                            subtitle = "Keep your student rolls and attendance history safely synced in Google Cloud"
-                        )
-                        Spacer(modifier = Modifier.height(12.dp))
-                        FeatureRow(
-                            icon = Icons.Default.OfflinePin,
-                            title = "Full Offline Support",
-                            subtitle = "Take attendance anywhere even without an internet connection"
-                        )
-                        Spacer(modifier = Modifier.height(12.dp))
-                        FeatureRow(
-                            icon = Icons.Default.Lock,
-                            title = "Privacy & Security",
-                            subtitle = "Authenticated with your Google account with isolated database security"
-                        )
-                    }
-                }
-                Spacer(modifier = Modifier.height(32.dp))
-
-                if (errorMessage != null) {
-                    Text(
-                        text = errorMessage ?: "",
-                        color = MaterialTheme.colorScheme.error,
-                        style = MaterialTheme.typography.bodySmall,
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier.padding(bottom = 16.dp)
-                    )
-                }
-
-                if (isLoading) {
-                    CircularProgressIndicator(modifier = Modifier.size(48.dp))
-                } else {
-                    Button(
-                        onClick = {
-                            val activity = context as? Activity
-                            if (activity != null) {
-                                isLoading = true
-                                errorMessage = null
-                                authManager.signInWithGoogle(
-                                    activity = activity,
-                                    scope = scope,
-                                    onSuccess = { user ->
-                                        isLoading = false
-                                        onSignInSuccess(user)
-                                    },
-                                    onError = { err ->
-                                        isLoading = false
-                                        errorMessage = err
-                                    },
-                                    onCancelled = {
-                                        isLoading = false
-                                    }
-                                )
-                            } else {
-                                errorMessage = "Activity not found"
-                            }
-                        },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(50.dp)
-                            .testTag("sign_in_google_button")
-                    ) {
-                        Text("Sign in with Google", fontWeight = FontWeight.SemiBold)
-                    }
-
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    OutlinedButton(
-                        onClick = onContinueOffline,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(50.dp)
-                            .testTag("continue_offline_button")
-                    ) {
-                        Text("Continue in Offline Mode")
+                    Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        FeatureRow(icon = Icons.Default.Check, title = "Cloud Sync", subtitle = "Never lose student records or daily attendance")
+                        FeatureRow(icon = Icons.Default.Refresh, title = "Multi-Device", subtitle = "Use on your phone or classroom tablet seamlessly")
+                        FeatureRow(icon = Icons.Default.Done, title = "Private & Secure", subtitle = "Your roster is encrypted and tied to your Google account")
                     }
                 }
 
                 Spacer(modifier = Modifier.height(24.dp))
 
-                IconButton(
+                errorMessage?.let { msg ->
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 16.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            Text(
+                                text = msg,
+                                color = MaterialTheme.colorScheme.onErrorContainer,
+                                style = MaterialTheme.typography.bodySmall,
+                                textAlign = TextAlign.Start
+                            )
+                            Spacer(modifier = Modifier.height(6.dp))
+                            TextButton(
+                                onClick = { showDiagnosticsDialog = true },
+                                modifier = Modifier.align(Alignment.End)
+                            ) {
+                                Text("View Signing SHA-1 & Fix", style = MaterialTheme.typography.labelMedium)
+                            }
+                        }
+                    }
+                }
+
+                Button(
+                    onClick = {
+                        isLoading = true
+                        errorMessage = null
+                        val activity = context as? Activity
+                        if (activity == null) {
+                            isLoading = false
+                            errorMessage = "Activity not found"
+                            return@Button
+                        }
+                        authManager.signInWithGoogle(
+                            activity = activity,
+                            scope = coroutineScope,
+                            onSuccess = { user ->
+                                isLoading = false
+                                onAuthSuccess(user)
+                            },
+                            onError = { err ->
+                                isLoading = false
+                                errorMessage = err
+                            },
+                            onCancelled = {
+                                isLoading = false
+                                errorMessage = "Sign-in dismissed or interrupted. If you picked your account, the app's signing key SHA-1 fingerprint needs to be added in Firebase Console."
+                            }
+                        )
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(52.dp)
+                        .testTag("sign_in_google_button"),
+                    enabled = !isLoading,
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                ) {
+                    if (isLoading) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(24.dp),
+                            color = MaterialTheme.colorScheme.onPrimary,
+                            strokeWidth = 2.dp
+                        )
+                    } else {
+                        Icon(
+                            Icons.Default.AccountBox,
+                            contentDescription = null,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Text("Sign in with Google", style = MaterialTheme.typography.titleMedium)
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                TextButton(
                     onClick = { showDiagnosticsDialog = true },
                     modifier = Modifier.testTag("diagnostics_button")
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.Info,
-                        contentDescription = "Diagnostics",
-                        tint = MaterialTheme.colorScheme.outline
+                    Text(
+                        text = "Trouble signing in? View SHA-1 Certificate",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.outline
+                    )
+                }
+
+                // Signing in is only needed for cloud backup. This lets the app be
+                // used (and your data reached) even if sign-in is not working.
+                if (onContinueOffline != null) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedButton(
+                        onClick = onContinueOffline,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("continue_offline_button")
+                    ) {
+                        Text("Continue without signing in (offline only)")
+                    }
+                    Text(
+                        text = "You can still take attendance and save backups to a file. " +
+                            "Sign in later from Settings to use cloud backup.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.outline,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.padding(top = 6.dp)
                     )
                 }
             }
@@ -209,28 +221,48 @@ fun SignInScreen(
     }
 
     if (showDiagnosticsDialog) {
-        val sha1 = SigningUtils.getSha1Fingerprint(context)
-        val sha256 = SigningUtils.getSha256Fingerprint(context)
-        val packageName = context.packageName
-
+        val currentSha1 = com.aistudio.classroll.jkmxlp.util.SigningUtils.getSha1Fingerprint(context)
+        val currentSha256 = com.aistudio.classroll.jkmxlp.util.SigningUtils.getSha256Fingerprint(context)
         AlertDialog(
             onDismissRequest = { showDiagnosticsDialog = false },
-            title = { Text("App Diagnostics") },
+            title = { Text("Google Sign-In Setup") },
             text = {
-                Column {
-                    Text("Package Name:\n$packageName", style = MaterialTheme.typography.bodySmall)
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text("Installed APK SHA-1:\n$sha1", style = MaterialTheme.typography.bodySmall)
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text("Installed APK SHA-256:\n$sha256", style = MaterialTheme.typography.bodySmall)
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        text = "Google Sign-In requires your signing key's SHA-1 fingerprint to be registered in your Firebase Console project.",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    Divider()
+                    Text(
+                        text = "Package Name:\n${context.packageName}",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        text = "Installed APK SHA-1:\n$currentSha1",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Text(
+                        text = "Installed APK SHA-256:\n$currentSha256",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    Divider()
+                    Text(
+                        text = "How to fix in 1 minute:\n1. Copy the SHA-1 below.\n2. Open Firebase Console -> Project Settings -> General -> Your Android App.\n3. Click 'Add fingerprint' and paste it.\n4. Sign-in works immediately without rebuilding!",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
             },
             confirmButton = {
-                TextButton(onClick = {
-                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                    clipboard.setPrimaryClip(ClipData.newPlainText("SHA-1", sha1))
-                    Toast.makeText(context, "SHA-1 copied to clipboard", Toast.LENGTH_SHORT).show()
-                }) {
+                Button(
+                    onClick = {
+                        clipboardManager.setText(androidx.compose.ui.text.AnnotatedString(currentSha1))
+                        android.widget.Toast.makeText(context, "SHA-1 copied to clipboard", android.widget.Toast.LENGTH_SHORT).show()
+                    }
+                ) {
                     Text("Copy SHA-1")
                 }
             },
@@ -244,17 +276,24 @@ fun SignInScreen(
 }
 
 @Composable
-fun FeatureRow(icon: ImageVector, title: String, subtitle: String) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
+private fun FeatureRow(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    title: String,
+    subtitle: String
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        modifier = Modifier.fillMaxWidth()
+    ) {
         Icon(
             imageVector = icon,
             contentDescription = null,
             tint = MaterialTheme.colorScheme.primary,
             modifier = Modifier.size(24.dp)
         )
-        Spacer(modifier = Modifier.width(12.dp))
         Column {
-            Text(text = title, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+            Text(text = title, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
             Text(text = subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
