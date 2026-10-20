@@ -3,11 +3,9 @@ package com.aistudio.classroll.jkmxlp.ui
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import androidx.room.Room
 import com.aistudio.classroll.jkmxlp.data.AppDatabase
 import com.aistudio.classroll.jkmxlp.data.AttendanceRecordEntity
 import com.aistudio.classroll.jkmxlp.data.ClassRollRepository
-import com.aistudio.classroll.jkmxlp.data.NetworkModule
 import com.aistudio.classroll.jkmxlp.data.RemoteStudent
 import com.aistudio.classroll.jkmxlp.data.SettingsRepository
 import com.aistudio.classroll.jkmxlp.data.StudentEntity
@@ -40,11 +38,9 @@ private data class ParsedBackup(
 )
 
 class ClassRollViewModel(application: Application) : AndroidViewModel(application) {
-    private val db = Room.databaseBuilder(application, AppDatabase::class.java, "classroll_db")
-        .fallbackToDestructiveMigration()
-        .build()
+    private val db = AppDatabase.getInstance(application)
     private val settingsRepo = SettingsRepository(application)
-    val repository = ClassRollRepository(db.classRollDao(), NetworkModule.apiService, settingsRepo, db)
+    val repository = ClassRollRepository(db.classRollDao(), settingsRepo, db)
     val firestoreRepo = com.aistudio.classroll.jkmxlp.data.FirestoreRepository(application)
 
     private val _isCloudSyncing = MutableStateFlow(false)
@@ -66,7 +62,6 @@ class ClassRollViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
-    val webAppUrl = settingsRepo.webAppUrlFlow.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "")
     val currentYear = settingsRepo.academicYearFlow.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "")
     val appTheme = settingsRepo.appThemeFlow.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "SYSTEM")
     // NEW
@@ -146,31 +141,28 @@ class ClassRollViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
-    fun fetchYears() {
-        viewModelScope.launch {
-            _isSyncing.value = true
-            val years = repository.fetchYears()
-            if (years.isNotEmpty()) {
-                _availableYears.value = years
-            }
-            _isSyncing.value = false
-        }
-    }
-
-    fun syncStudents() {
-        viewModelScope.launch {
-            _isSyncing.value = true
-            repository.syncStudents()
-            _isSyncing.value = false
-        }
-    }
-
     fun importStudents(year: String, students: List<RemoteStudent>, onResult: (String) -> Unit) {
         viewModelScope.launch {
             _isSyncing.value = true
             val result = repository.importStudents(year, students)
             _isSyncing.value = false
+            loadAvailableYears()
             onResult(result)
+
+            if (result == "Success") {
+                launch {
+                    try {
+                        val entities = students.map {
+                            StudentEntity(year = year, roll = it.roll, name = it.name, active = it.active)
+                        }
+                        firestoreRepo.saveStudentsBatch(entities)
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        // Offline-first: local copy is already saved.
+                    }
+                }
+            }
         }
     }
 

@@ -26,9 +26,11 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -296,6 +298,12 @@ fun RegisterScreen(viewModel: ClassRollViewModel) {
         }
         val unmarkedCount = (totalStudents - presentList.size - absentList.size).coerceAtLeast(0)
 
+        val isDark = MaterialTheme.colorScheme.background.luminance() < 0.5f
+        val presentMetricColor = if (isDark) Color(0xFF81C784) else Color(0xFF2E7D32)
+        val absentMetricColor = if (isDark) Color(0xFFFF8A80) else Color(0xFFC62828)
+        val absentRowBg = if (isDark) Color(0xFF3E1A1E) else Color(0xFFFFEBEE)
+        val presentBannerBg = if (isDark) Color(0xFF193623) else Color(0xFFE8F5E9)
+
         AlertDialog(
             onDismissRequest = { summaryDate = null },
             title = {
@@ -343,12 +351,12 @@ fun RegisterScreen(viewModel: ClassRollViewModel) {
                                 horizontalArrangement = Arrangement.SpaceEvenly
                             ) {
                                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                    Text("Present", style = MaterialTheme.typography.labelSmall, color = Color(0xFF2E7D32))
-                                    Text("${presentList.size}", style = MaterialTheme.typography.titleMedium, color = Color(0xFF2E7D32))
+                                    Text("Present", style = MaterialTheme.typography.labelSmall, color = presentMetricColor)
+                                    Text("${presentList.size}", style = MaterialTheme.typography.titleMedium, color = presentMetricColor)
                                 }
                                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                    Text("Absent", style = MaterialTheme.typography.labelSmall, color = Color(0xFFC62828))
-                                    Text("${absentList.size}", style = MaterialTheme.typography.titleMedium, color = Color(0xFFC62828))
+                                    Text("Absent", style = MaterialTheme.typography.labelSmall, color = absentMetricColor)
+                                    Text("${absentList.size}", style = MaterialTheme.typography.titleMedium, color = absentMetricColor)
                                 }
                                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                     Text("Unmarked", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
@@ -366,15 +374,15 @@ fun RegisterScreen(viewModel: ClassRollViewModel) {
                                 LinearProgressIndicator(
                                     progress = { presentRatio },
                                     modifier = Modifier.fillMaxWidth().height(6.dp),
-                                    color = Color(0xFF2E7D32),
-                                    trackColor = Color(0xFFFFCDD2)
+                                    color = presentMetricColor,
+                                    trackColor = absentMetricColor.copy(alpha = 0.3f)
                                 )
                                 Spacer(Modifier.height(4.dp))
                                 Text(
                                     text = "$presentPct% Present Rate",
                                     style = MaterialTheme.typography.labelSmall,
                                     modifier = Modifier.align(Alignment.End),
-                                    color = Color(0xFF2E7D32)
+                                    color = presentMetricColor
                                 )
                             }
                         }
@@ -387,14 +395,14 @@ fun RegisterScreen(viewModel: ClassRollViewModel) {
                         Text(
                             text = "Absent Students (${absentList.size}):",
                             style = MaterialTheme.typography.titleSmall,
-                            color = Color(0xFFC62828)
+                            color = absentMetricColor
                         )
                         Spacer(Modifier.height(6.dp))
                         LazyColumn(modifier = Modifier.fillMaxWidth().heightIn(max = 180.dp)) {
                             items(absentList, key = { it.roll }) { student ->
                                 Surface(
                                     modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
-                                    color = Color(0xFFFFEBEE),
+                                    color = absentRowBg,
                                     shape = RoundedCornerShape(8.dp)
                                 ) {
                                     Row(
@@ -405,12 +413,12 @@ fun RegisterScreen(viewModel: ClassRollViewModel) {
                                         Text(
                                             text = "Roll #${student.roll}  ${student.name}",
                                             style = MaterialTheme.typography.bodyMedium,
-                                            color = Color(0xFFC62828)
+                                            color = absentMetricColor
                                         )
                                         Text(
                                             text = "Absent",
                                             style = MaterialTheme.typography.labelSmall,
-                                            color = Color(0xFFC62828)
+                                            color = absentMetricColor
                                         )
                                     }
                                 }
@@ -418,14 +426,14 @@ fun RegisterScreen(viewModel: ClassRollViewModel) {
                         }
                     } else if (presentList.size == totalStudents && totalStudents > 0) {
                         Surface(
-                            color = Color(0xFFE8F5E9),
+                            color = presentBannerBg,
                             shape = RoundedCornerShape(8.dp),
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Text(
                                 text = "🎉 100% Attendance! All students were present.",
                                 style = MaterialTheme.typography.bodyMedium,
-                                color = Color(0xFF2E7D32),
+                                color = presentMetricColor,
                                 modifier = Modifier.padding(12.dp),
                                 textAlign = TextAlign.Center
                             )
@@ -457,6 +465,21 @@ fun RegisterScreen(viewModel: ClassRollViewModel) {
     }
 
     val horizontalScrollState = rememberScrollState()
+    val density = LocalDensity.current
+    val isDark = MaterialTheme.colorScheme.background.luminance() < 0.5f
+    val gridBorderColor = MaterialTheme.colorScheme.outlineVariant
+
+    // Auto-scroll to today's column when viewing the current month
+    LaunchedEffect(selectedMonthStr, dates) {
+        val todayIndex = dates.indexOf(todayStr)
+        if (todayIndex >= 0) {
+            val cellWidthPx = with(density) { 48.dp.roundToPx() }
+            val targetPx = ((todayIndex - 2).coerceAtLeast(0)) * cellWidthPx
+            horizontalScrollState.animateScrollTo(targetPx)
+        } else {
+            horizontalScrollState.scrollTo(0)
+        }
+    }
 
     Scaffold(
         floatingActionButton = {
@@ -602,7 +625,7 @@ fun RegisterScreen(viewModel: ClassRollViewModel) {
                                     .width(130.dp)
                                     .fillMaxHeight()
                                     .background(MaterialTheme.colorScheme.surfaceVariant)
-                                    .border(1.dp, Color.Gray),
+                                    .border(1.dp, gridBorderColor),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Text("Roll / Name", style = MaterialTheme.typography.labelSmall)
@@ -620,8 +643,10 @@ fun RegisterScreen(viewModel: ClassRollViewModel) {
                                     val dayOfWeek = getDayOfWeekShort(date)
                                     val isWeekendDay = isWeekend(date)
                                     val isCustomHoliday = holidays.contains(date)
+                                    val isToday = date == todayStr
 
                                     val headerBg = when {
+                                        isToday -> MaterialTheme.colorScheme.primaryContainer
                                         isCustomHoliday -> MaterialTheme.colorScheme.tertiaryContainer
                                         isWeekendDay -> MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.85f)
                                         else -> MaterialTheme.colorScheme.surfaceVariant
@@ -632,7 +657,10 @@ fun RegisterScreen(viewModel: ClassRollViewModel) {
                                             .width(48.dp)
                                             .fillMaxHeight()
                                             .background(headerBg)
-                                            .border(1.dp, Color.Gray)
+                                            .border(
+                                                width = if (isToday) 2.dp else 1.dp,
+                                                color = if (isToday) MaterialTheme.colorScheme.primary else gridBorderColor
+                                            )
                                             .pointerInput(date) {
                                                 detectTapGestures(
                                                     onTap = { summaryDate = date },
@@ -645,15 +673,17 @@ fun RegisterScreen(viewModel: ClassRollViewModel) {
                                             Text(
                                                 dayStr,
                                                 style = MaterialTheme.typography.labelSmall,
-                                                fontWeight = if (isWeekendDay || isCustomHoliday) FontWeight.Bold else FontWeight.Normal
+                                                fontWeight = if (isToday || isWeekendDay || isCustomHoliday) FontWeight.Bold else FontWeight.Normal,
+                                                color = if (isToday) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface
                                             )
                                             Text(
-                                                text = if (isCustomHoliday) "Off" else dayOfWeek,
+                                                text = if (isCustomHoliday) "Off" else if (isToday) "Today" else dayOfWeek,
                                                 style = MaterialTheme.typography.labelSmall,
                                                 color = when {
+                                                    isToday -> MaterialTheme.colorScheme.primary
                                                     isCustomHoliday -> MaterialTheme.colorScheme.onTertiaryContainer
                                                     isWeekendDay -> MaterialTheme.colorScheme.onSecondaryContainer
-                                                    else -> Color.Gray
+                                                    else -> MaterialTheme.colorScheme.onSurfaceVariant
                                                 }
                                             )
                                         }
@@ -675,7 +705,7 @@ fun RegisterScreen(viewModel: ClassRollViewModel) {
                                         Modifier
                                             .width(130.dp)
                                             .fillMaxHeight()
-                                            .border(1.dp, Color.Gray)
+                                            .border(1.dp, gridBorderColor)
                                             .padding(4.dp)
                                             .clickable {
                                                 editingStudentRoll = student.roll
@@ -704,13 +734,15 @@ fun RegisterScreen(viewModel: ClassRollViewModel) {
                                             val status = record?.status ?: ""
                                             val isWeekendDay = isWeekend(date)
                                             val isCustomHoliday = holidays.contains(date)
+                                            val isToday = date == todayStr
 
-                                            // Styling for cell
+                                            // Dark-mode-aware styling for cell
                                             val cellColor = when {
                                                 isWeekendDay -> MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.35f)
                                                 isCustomHoliday -> MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.35f)
-                                                status == "P" -> Color(0xFFC8E6C9)
-                                                status == "A" -> Color(0xFFFFCDD2)
+                                                status == "P" -> if (isDark) Color(0xFF1B4326) else Color(0xFFC8E6C9)
+                                                status == "A" -> if (isDark) Color(0xFF4E1F24) else Color(0xFFFFCDD2)
+                                                isToday -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.15f)
                                                 else -> Color.Transparent
                                             }
 
@@ -724,8 +756,8 @@ fun RegisterScreen(viewModel: ClassRollViewModel) {
                                             val textColor = when {
                                                 isWeekendDay -> MaterialTheme.colorScheme.outline
                                                 isCustomHoliday -> MaterialTheme.colorScheme.tertiary
-                                                status == "P" -> Color(0xFF1B5E20)
-                                                status == "A" -> Color(0xFFB71C1C)
+                                                status == "P" -> if (isDark) Color(0xFFA5D6A7) else Color(0xFF1B5E20)
+                                                status == "A" -> if (isDark) Color(0xFFEF9A9A) else Color(0xFFB71C1C)
                                                 else -> MaterialTheme.colorScheme.onSurface
                                             }
 
@@ -737,7 +769,10 @@ fun RegisterScreen(viewModel: ClassRollViewModel) {
                                                     .width(48.dp)
                                                     .fillMaxHeight()
                                                     .background(cellColor)
-                                                    .border(1.dp, Color.Gray.copy(alpha = 0.6f))
+                                                    .border(
+                                                        width = 1.dp,
+                                                        color = if (isToday) MaterialTheme.colorScheme.primary.copy(alpha = 0.5f) else gridBorderColor
+                                                    )
                                                     .then(
                                                         if (isCellEditable) {
                                                             Modifier.clickable {
@@ -762,7 +797,7 @@ fun RegisterScreen(viewModel: ClassRollViewModel) {
                                                     text = displayText,
                                                     textAlign = TextAlign.Center,
                                                     style = MaterialTheme.typography.labelSmall,
-                                                    fontWeight = if (isWeekendDay || isCustomHoliday) FontWeight.SemiBold else FontWeight.Normal,
+                                                    fontWeight = if (isWeekendDay || isCustomHoliday || status.isNotBlank()) FontWeight.SemiBold else FontWeight.Normal,
                                                     color = textColor
                                                 )
                                             }

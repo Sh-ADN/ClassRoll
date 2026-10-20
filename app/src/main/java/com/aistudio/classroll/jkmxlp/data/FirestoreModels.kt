@@ -1,39 +1,40 @@
 package com.aistudio.classroll.jkmxlp.data
 
 import com.google.firebase.Timestamp
-import com.google.firebase.firestore.DocumentId
-import com.google.firebase.firestore.IgnoreExtraProperties
-import com.google.firebase.firestore.ServerTimestamp
 
-@IgnoreExtraProperties
 data class FirestoreStudent(
-    @DocumentId val id: String = "",
+    val id: String = "",
     val userId: String = "",
     val year: String = "",
     val roll: String = "",
     val name: String = "",
     val active: Boolean = true,
-    @ServerTimestamp val createdAt: Timestamp? = null,
-    @ServerTimestamp val updatedAt: Timestamp? = null
-)
+    val createdAt: Timestamp = Timestamp.now(),
+    val updatedAt: Timestamp = Timestamp.now()
+) {
+    // No-arg constructor for Firestore
+    constructor() : this("", "", "", "", "", true, Timestamp.now(), Timestamp.now())
+}
 
-@IgnoreExtraProperties
 data class FirestoreAttendanceRecord(
-    @DocumentId val id: String = "",
+    val id: String = "",
     val userId: String = "",
     val year: String = "",
     val date: String = "",
     val roll: String = "",
     val status: String = "",
-    @ServerTimestamp val createdAt: Timestamp? = null,
-    @ServerTimestamp val updatedAt: Timestamp? = null
-)
+    val createdAt: Timestamp = Timestamp.now(),
+    val updatedAt: Timestamp = Timestamp.now()
+) {
+    constructor() : this("", "", "", "", "", "", Timestamp.now(), Timestamp.now())
+}
 
-@IgnoreExtraProperties
 data class FirestoreUserSettings(
-    @DocumentId val id: String = "",
+    val id: String = "",
     val userId: String = "",
-    val academicYear: String = "",
-    val appTheme: String = "SYSTEM",
-    @ServerTimestamp val updatedAt: Timestamp? = null
-)
+    val academicYear: String = "2025",
+    val appTheme: String = "system",
+    val updatedAt: Timestamp = Timestamp.now()
+) {
+    constructor() : this("", "", "2025", "system", Timestamp.now())
+}

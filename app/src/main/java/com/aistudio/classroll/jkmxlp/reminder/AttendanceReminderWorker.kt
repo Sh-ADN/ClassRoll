@@ -59,17 +59,10 @@ class AttendanceReminderWorker(
 
         if (year.isNotBlank() && !isWeekend && !isHoliday) {
             try {
-                // No destructive-migration fallback here: a background job must never
-                // be able to wipe the database if the schema ever changes.
-                val db = Room.databaseBuilder(applicationContext, AppDatabase::class.java, "classroll_db")
-                    .build()
-                try {
-                    val count = db.classRollDao().countAttendanceForDate(year, today)
-                    if (count == 0) {
-                        showNotification()
-                    }
-                } finally {
-                    db.close()
+                val db = AppDatabase.getInstance(applicationContext)
+                val count = db.classRollDao().countAttendanceForDate(year, today)
+                if (count == 0) {
+                    showNotification()
                 }
             } catch (e: Exception) {
                 // Could not read the data this time. Skip today's reminder, but keep

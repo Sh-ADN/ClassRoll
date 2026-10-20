@@ -80,12 +80,62 @@ class FirestoreRepository(private val db: FirebaseFirestore) {
         }
     }
 
+    suspend fun saveStudentsBatch(students: List<StudentEntity>) {
+        val valid = students.filter { it.roll.isNotBlank() && it.name.isNotBlank() }
+        if (valid.isEmpty()) return
+        val uid = requireUserId()
+        val studentsCol = db.collection("users").document(uid).collection("students")
+        val defaultYear = java.text.SimpleDateFormat("yyyy", java.util.Locale.US).format(java.util.Date())
+        val tasks = mutableListOf<Task<Void>>()
+        valid.chunked(450).forEach { chunk ->
+            val batch = db.batch()
+            chunk.forEach { student ->
+                val normYear = student.year.trim().ifBlank { defaultYear }
+                val normRoll = student.roll.trim()
+                val docRef = studentsCol.document(studentDocId(normYear, normRoll))
+                batch.set(
+                    docRef,
+                    hashMapOf(
+                        "userId" to uid,
+                        "year" to normYear,
+                        "roll" to normRoll,
+                        "name" to student.name.trim(),
+                        "active" to student.active,
+                        "updatedAt" to FieldValue.serverTimestamp()
+                    )
+                )
+            }
+            tasks.add(batch.commit())
+        }
+        try {
+            tasks.forEach { it.await() }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.WRITE, studentsCol.path)
+            throw e
+        }
+    }
+
     suspend fun deleteStudent(year: String, roll: String) {
         val uid = requireUserId()
-        val docId = studentDocId(year, roll)
+        val normYear = year.trim()
+        val normRoll = roll.trim()
+        val docId = studentDocId(normYear, normRoll)
         val docRef = db.collection("users").document(uid).collection("students").document(docId)
+        val attendanceCol = db.collection("users").document(uid).collection("attendance")
         try {
             docRef.delete().await()
+            val orphanedSnapshot = attendanceCol
+                .whereEqualTo("year", normYear)
+                .whereEqualTo("roll", normRoll)
+                .get()
+                .await()
+            orphanedSnapshot.documents.chunked(450).forEach { chunk ->
+                val batch = db.batch()
+                chunk.forEach { doc -> batch.delete(doc.reference) }
+                batch.commit().await()
+            }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {

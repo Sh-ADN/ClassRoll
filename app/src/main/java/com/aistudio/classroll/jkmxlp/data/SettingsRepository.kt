@@ -16,11 +16,8 @@ val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "se
 
 class SettingsRepository(private val context: Context) {
     companion object {
-        val WEB_APP_URL = stringPreferencesKey("web_app_url")
         val ACADEMIC_YEAR = stringPreferencesKey("academic_year")
-        val APPS_SCRIPT_TOKEN = stringPreferencesKey("apps_script_token")
         val APP_THEME = stringPreferencesKey("app_theme")
-        // NEW
         val LAST_BACKUP_TIMESTAMP = longPreferencesKey("last_backup_timestamp")
         val REMINDER_ENABLED = booleanPreferencesKey("reminder_enabled")
         val REMINDER_TIME = stringPreferencesKey("reminder_time") // "HH:mm", 24h
@@ -32,12 +29,6 @@ class SettingsRepository(private val context: Context) {
         preferences[APP_THEME] ?: "SYSTEM"
     }
 
-    // The old Google Sheets / Apps Script sync is no longer used. The URL that used
-    // to be hardcoded here has been removed so it is not stored in the repository.
-    val webAppUrlFlow: Flow<String> = context.dataStore.data.map { preferences ->
-        preferences[WEB_APP_URL] ?: ""
-    }
-
     val academicYearFlow: Flow<String> = context.dataStore.data.map { preferences ->
         val stored = preferences[ACADEMIC_YEAR]
         if (!stored.isNullOrBlank()) {
@@ -47,50 +38,29 @@ class SettingsRepository(private val context: Context) {
         }
     }
 
-    val appsScriptTokenFlow: Flow<String> = context.dataStore.data.map { preferences ->
-        preferences[APPS_SCRIPT_TOKEN] ?: ""
-    }
-
-    // NEW: when the last successful backup happened (epoch millis, 0 = never)
     val lastBackupTimestampFlow: Flow<Long> = context.dataStore.data.map { preferences ->
         preferences[LAST_BACKUP_TIMESTAMP] ?: 0L
     }
 
-    // NEW: whether the daily "take attendance" reminder is turned on
     val reminderEnabledFlow: Flow<Boolean> = context.dataStore.data.map { preferences ->
         preferences[REMINDER_ENABLED] ?: false
     }
 
-    // NEW: what time of day the reminder should fire
     val reminderTimeFlow: Flow<String> = context.dataStore.data.map { preferences ->
         preferences[REMINDER_TIME] ?: "10:00"
     }
 
-    // NEW: set of custom holiday date strings ("yyyy-MM-dd")
     val holidaysFlow: Flow<Set<String>> = context.dataStore.data.map { preferences ->
         preferences[CUSTOM_HOLIDAYS] ?: emptySet()
     }
 
-    // True when the user chose to use the app without signing in with Google.
     val offlineModeFlow: Flow<Boolean> = context.dataStore.data.map { preferences ->
         preferences[OFFLINE_MODE] ?: false
-    }
-
-    suspend fun updateWebAppUrl(url: String) {
-        context.dataStore.edit { preferences ->
-            preferences[WEB_APP_URL] = url
-        }
     }
 
     suspend fun updateAcademicYear(year: String) {
         context.dataStore.edit { preferences ->
             preferences[ACADEMIC_YEAR] = year
-        }
-    }
-
-    suspend fun updateAppsScriptToken(token: String) {
-        context.dataStore.edit { preferences ->
-            preferences[APPS_SCRIPT_TOKEN] = token
         }
     }
 
@@ -100,7 +70,6 @@ class SettingsRepository(private val context: Context) {
         }
     }
 
-    // NEW
     suspend fun updateLastBackupTimestamp(timestamp: Long) {
         context.dataStore.edit { preferences ->
             preferences[LAST_BACKUP_TIMESTAMP] = timestamp
@@ -136,7 +105,6 @@ class SettingsRepository(private val context: Context) {
         }
     }
 
-    // Replaces the whole holiday list (used when restoring from a backup).
     suspend fun setHolidays(dates: Set<String>) {
         context.dataStore.edit { preferences ->
             preferences[CUSTOM_HOLIDAYS] = dates

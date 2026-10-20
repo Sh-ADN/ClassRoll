@@ -18,3 +18,9 @@ data class AttendanceRecordEntity(
     val status: String,
     val isSynced: Boolean = true
 )
+
+data class RemoteStudent(
+    val roll: String,
+    val name: String,
+    val active: Boolean = true
+)

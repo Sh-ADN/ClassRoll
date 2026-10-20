@@ -9,7 +9,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.*
@@ -20,9 +19,9 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.aistudio.classroll.jkmxlp.data.AttendanceRecordEntity
 import com.aistudio.classroll.jkmxlp.ui.ClassRollViewModel
 import java.util.Locale
 
@@ -40,6 +39,17 @@ fun SummaryDashboardScreen(viewModel: ClassRollViewModel) {
     var sortOption by remember { mutableStateOf(StatSortOption.ROLL) }
     var showConsecutiveAlertsOnly by remember { mutableStateOf(false) }
     var selectedStudentRoll by remember { mutableStateOf<String?>(null) }
+
+    val isDark = MaterialTheme.colorScheme.background.luminance() < 0.5f
+    val alertCardBg = if (isDark) Color(0xFF3E1A1E) else Color(0xFFFFEBEE)
+    val alertBannerBg = if (isDark) Color(0xFF4D1F24) else Color(0xFFFFCDD2)
+    val alertTextColor = if (isDark) Color(0xFFFFB4AB) else Color(0xFFB71C1C)
+    val alertAccentColor = if (isDark) Color(0xFFFF8A80) else Color(0xFFD32F2F)
+    val warningCardBg = if (isDark) Color(0xFF382D14) else Color(0xFFFFF8E1)
+    val warningIconColor = if (isDark) Color(0xFFFFD54F) else Color(0xFFF57F17)
+    val presentCardBg = if (isDark) Color(0xFF193623) else Color(0xFFE8F5E9)
+    val goodAccentColor = if (isDark) Color(0xFF81C784) else Color(0xFF388E3C)
+    val chartTrackColor = MaterialTheme.colorScheme.onSurface.copy(alpha = if (isDark) 0.18f else 0.12f)
 
     if (students.isEmpty()) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -168,7 +178,7 @@ fun SummaryDashboardScreen(viewModel: ClassRollViewModel) {
                                 Text(
                                     "${selStudent?.maxConsecutiveAbsences}",
                                     style = MaterialTheme.typography.titleMedium,
-                                    color = if ((selStudent?.maxConsecutiveAbsences ?: 0) >= 2) Color(0xFFD32F2F) else MaterialTheme.colorScheme.onSurface
+                                    color = if ((selStudent?.maxConsecutiveAbsences ?: 0) >= 2) alertAccentColor else MaterialTheme.colorScheme.onPrimaryContainer
                                 )
                             }
                         }
@@ -186,7 +196,8 @@ fun SummaryDashboardScreen(viewModel: ClassRollViewModel) {
                                 Card(
                                     modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
                                     colors = CardDefaults.cardColors(
-                                        containerColor = if (record.status == "P") Color(0xFFE8F5E9) else Color(0xFFFFEBEE)
+                                        containerColor = if (record.status == "P") presentCardBg else alertCardBg,
+                                        contentColor = MaterialTheme.colorScheme.onSurface
                                     )
                                 ) {
                                     Row(
@@ -195,8 +206,8 @@ fun SummaryDashboardScreen(viewModel: ClassRollViewModel) {
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
                                         Column {
-                                            Text(record.date, style = MaterialTheme.typography.titleSmall)
-                                            Text("Academic Year $currentYear", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+                                            Text(record.date, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurface)
+                                            Text("Academic Year $currentYear", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                         }
 
                                         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -257,7 +268,7 @@ fun SummaryDashboardScreen(viewModel: ClassRollViewModel) {
                     Text(
                         String.format(Locale.US, "%.1f%%", classAvgPct),
                         style = MaterialTheme.typography.titleMedium,
-                        color = if (classAvgPct < 75f) Color(0xFFD32F2F) else Color(0xFF388E3C)
+                        color = if (classAvgPct < 75f) alertAccentColor else goodAccentColor
                     )
                 }
             }
@@ -266,15 +277,16 @@ fun SummaryDashboardScreen(viewModel: ClassRollViewModel) {
                     showConsecutiveAlertsOnly = !showConsecutiveAlertsOnly
                 },
                 colors = CardDefaults.cardColors(
-                    containerColor = if (consecutiveAbsenceCount > 0) Color(0xFFFFEBEE) else MaterialTheme.colorScheme.surfaceVariant
+                    containerColor = if (consecutiveAbsenceCount > 0) alertCardBg else MaterialTheme.colorScheme.surfaceVariant,
+                    contentColor = MaterialTheme.colorScheme.onSurface
                 )
             ) {
                 Column(Modifier.padding(12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("2+ Consecutive Abs.", style = MaterialTheme.typography.labelMedium)
+                    Text("2+ Consecutive Abs.", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurface)
                     Text(
                         "$consecutiveAbsenceCount",
                         style = MaterialTheme.typography.titleMedium,
-                        color = if (consecutiveAbsenceCount > 0) Color(0xFFD32F2F) else MaterialTheme.colorScheme.onSurface
+                        color = if (consecutiveAbsenceCount > 0) alertAccentColor else MaterialTheme.colorScheme.onSurface
                     )
                 }
             }
@@ -288,7 +300,7 @@ fun SummaryDashboardScreen(viewModel: ClassRollViewModel) {
                 modifier = Modifier.fillMaxWidth().clickable {
                     showConsecutiveAlertsOnly = !showConsecutiveAlertsOnly
                 },
-                colors = CardDefaults.cardColors(containerColor = Color(0xFFFFCDD2))
+                colors = CardDefaults.cardColors(containerColor = alertBannerBg)
             ) {
                 Row(
                     modifier = Modifier.padding(12.dp).fillMaxWidth(),
@@ -297,23 +309,23 @@ fun SummaryDashboardScreen(viewModel: ClassRollViewModel) {
                     Icon(
                         Icons.Default.Warning,
                         contentDescription = "Alert",
-                        tint = Color(0xFFB71C1C)
+                        tint = alertTextColor
                     )
                     Spacer(Modifier.width(8.dp))
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
                             "Consecutive Absence Alert!",
                             style = MaterialTheme.typography.titleSmall,
-                            color = Color(0xFFB71C1C)
+                            color = alertTextColor
                         )
                         Text(
                             "$consecutiveAbsenceCount student(s) have been absent for 2 or more consecutive days.",
                             style = MaterialTheme.typography.bodySmall,
-                            color = Color(0xFFB71C1C)
+                            color = alertTextColor
                         )
                     }
                     TextButton(onClick = { showConsecutiveAlertsOnly = !showConsecutiveAlertsOnly }) {
-                        Text(if (showConsecutiveAlertsOnly) "Show All" else "View Alerts", color = Color(0xFFB71C1C))
+                        Text(if (showConsecutiveAlertsOnly) "Show All" else "View Alerts", color = alertTextColor)
                     }
                 }
             }
@@ -341,7 +353,7 @@ fun SummaryDashboardScreen(viewModel: ClassRollViewModel) {
             Text("Sort:", style = MaterialTheme.typography.bodySmall)
             FilterChip(
                 selected = sortOption == StatSortOption.ROLL && !showConsecutiveAlertsOnly,
-                onClick = { 
+                onClick = {
                     sortOption = StatSortOption.ROLL
                     showConsecutiveAlertsOnly = false
                 },
@@ -349,15 +361,15 @@ fun SummaryDashboardScreen(viewModel: ClassRollViewModel) {
             )
             FilterChip(
                 selected = sortOption == StatSortOption.LOWEST_ATTENDANCE && !showConsecutiveAlertsOnly,
-                onClick = { 
-                    sortOption = StatSortOption.LOWEST_ATTENDANCE 
+                onClick = {
+                    sortOption = StatSortOption.LOWEST_ATTENDANCE
                     showConsecutiveAlertsOnly = false
                 },
                 label = { Text("Lowest %") }
             )
             FilterChip(
                 selected = sortOption == StatSortOption.CONSECUTIVE_ABSENCES || showConsecutiveAlertsOnly,
-                onClick = { 
+                onClick = {
                     sortOption = StatSortOption.CONSECUTIVE_ABSENCES
                     showConsecutiveAlertsOnly = true
                 },
@@ -383,7 +395,7 @@ fun SummaryDashboardScreen(viewModel: ClassRollViewModel) {
             Spacer(Modifier.width(20.dp))
             Text("(Tap card for Timeline)", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
         }
-        
+
         Spacer(Modifier.height(12.dp))
 
         LazyColumn(Modifier.fillMaxSize()) {
@@ -393,9 +405,10 @@ fun SummaryDashboardScreen(viewModel: ClassRollViewModel) {
                         selectedStudentRoll = stat.roll
                     },
                     colors = CardDefaults.cardColors(
-                        containerColor = if (stat.maxConsecutiveAbsences >= 2) Color(0xFFFFEBEE) 
-                                         else if (stat.totalClasses > 0 && stat.percentage < 75f) Color(0xFFFFF8E1) 
-                                         else MaterialTheme.colorScheme.surfaceVariant
+                        containerColor = if (stat.maxConsecutiveAbsences >= 2) alertCardBg
+                                         else if (stat.totalClasses > 0 && stat.percentage < 75f) warningCardBg
+                                         else MaterialTheme.colorScheme.surfaceVariant,
+                        contentColor = MaterialTheme.colorScheme.onSurface
                     )
                 ) {
                     Column(Modifier.fillMaxWidth().padding(12.dp)) {
@@ -404,8 +417,12 @@ fun SummaryDashboardScreen(viewModel: ClassRollViewModel) {
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text("${stat.roll} - ${stat.name}", style = MaterialTheme.typography.titleMedium)
+                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                                Text(
+                                    "${stat.roll} - ${stat.name}",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
                                 if (stat.maxConsecutiveAbsences >= 2) {
                                     Spacer(Modifier.width(6.dp))
                                     Surface(
@@ -421,13 +438,13 @@ fun SummaryDashboardScreen(viewModel: ClassRollViewModel) {
                                     }
                                 }
                             }
-                            
+
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 if (stat.totalClasses > 0 && stat.percentage < 75f && stat.maxConsecutiveAbsences < 2) {
                                     Icon(
                                         Icons.Default.Warning,
                                         contentDescription = "Low Attendance",
-                                        tint = Color(0xFFF57F17),
+                                        tint = warningIconColor,
                                         modifier = Modifier.size(18.dp)
                                     )
                                     Spacer(Modifier.width(4.dp))
@@ -435,7 +452,9 @@ fun SummaryDashboardScreen(viewModel: ClassRollViewModel) {
                                 Text(
                                     text = if (stat.totalClasses > 0) String.format(Locale.US, "%.1f%%", stat.percentage) else "N/A",
                                     style = MaterialTheme.typography.titleMedium,
-                                    color = if (stat.maxConsecutiveAbsences >= 2 || (stat.totalClasses > 0 && stat.percentage < 75f)) Color(0xFFD32F2F) else MaterialTheme.colorScheme.onSurface
+                                    color = if (stat.maxConsecutiveAbsences >= 2) alertAccentColor
+                                            else if (stat.totalClasses > 0 && stat.percentage < 75f) warningIconColor
+                                            else MaterialTheme.colorScheme.onSurface
                                 )
                             }
                         }
@@ -447,16 +466,16 @@ fun SummaryDashboardScreen(viewModel: ClassRollViewModel) {
                                 Canvas(Modifier.fillMaxSize()) {
                                     val presentRatio = stat.presentCount.toFloat() / chartMax.toFloat()
                                     val absentRatio = stat.absentCount.toFloat() / chartMax.toFloat()
-                                    
+
                                     val presentWidth = size.width * presentRatio
                                     val absentWidth = size.width * absentRatio
-                                    
+
                                     drawRoundRect(
-                                        color = Color.LightGray,
+                                        color = chartTrackColor,
                                         size = Size(size.width, size.height),
                                         cornerRadius = CornerRadius(4.dp.toPx())
                                     )
-                                    
+
                                     if (presentWidth > 0) {
                                         drawRoundRect(
                                             color = Color(0xFF4CAF50),
@@ -464,7 +483,7 @@ fun SummaryDashboardScreen(viewModel: ClassRollViewModel) {
                                             cornerRadius = CornerRadius(4.dp.toPx())
                                         )
                                     }
-                                    
+
                                     if (absentWidth > 0) {
                                         drawRoundRect(
                                             color = Color(0xFFF44336),
@@ -476,7 +495,11 @@ fun SummaryDashboardScreen(viewModel: ClassRollViewModel) {
                                 }
                             }
                             Spacer(Modifier.width(12.dp))
-                            Text("P:${stat.presentCount} A:${stat.absentCount}", style = MaterialTheme.typography.bodySmall)
+                            Text(
+                                "P:${stat.presentCount} A:${stat.absentCount}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
                         }
                     }
                 }

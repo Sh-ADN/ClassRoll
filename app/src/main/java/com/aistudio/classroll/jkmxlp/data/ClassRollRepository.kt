@@ -2,11 +2,9 @@ package com.aistudio.classroll.jkmxlp.data
 
 import androidx.room.withTransaction
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.first
 
 class ClassRollRepository(
     private val dao: ClassRollDao,
-    private val api: ApiService,
     private val settingsRepo: SettingsRepository,
     private val database: AppDatabase? = null
 ) {
@@ -26,16 +24,6 @@ class ClassRollRepository(
         return dao.getAllAttendanceForYear(year)
     }
 
-    // Sync Students from Server
-    suspend fun syncStudents() {
-        // Feature disabled - local only
-    }
-
-    // FIX: removed the loop that used to fill in a placeholder student for
-    // every number between 1 and the highest roll in the CSV. If a roll
-    // number was large or not part of a clean 1..N sequence, that loop
-    // could try to generate a huge number of blank rows and freeze this
-    // screen. Now it just imports exactly what's in the CSV.
     suspend fun importStudents(year: String, students: List<RemoteStudent>): String {
         return try {
             val entities = students.map {
@@ -49,9 +37,7 @@ class ClassRollRepository(
         }
     }
 
-    // Submit a single day's attendance
     suspend fun submitAttendance(year: String, date: String, records: List<AttendanceRecordEntity>): Boolean {
-        // Save locally
         dao.insertAttendanceRecords(records)
         return true
     }
@@ -60,17 +46,26 @@ class ClassRollRepository(
         dao.insertStudents(listOf(StudentEntity(year = year, roll = roll, name = name, active = true)))
     }
 
+    // Deletes both the student and all of their attendance records for that year
+    // inside a single transaction so no orphaned attendance records remain.
     suspend fun deleteStudent(year: String, roll: String) {
-        dao.deleteStudent(year, roll)
+        val deleteBoth: suspend () -> Unit = {
+            dao.deleteStudent(year, roll)
+            dao.deleteAttendanceForStudent(year, roll)
+        }
+        val db = database
+        if (db != null) {
+            db.withTransaction { deleteBoth() }
+        } else {
+            deleteBoth()
+        }
     }
 
     suspend fun deleteAttendanceRecord(year: String, date: String, roll: String) {
         dao.deleteAttendanceRecord(year, date, roll)
     }
 
-    // Update single cell (from Register screen)
     suspend fun updateAttendanceCell(year: String, date: String, roll: String, status: String): Boolean {
-        // Update locally
         dao.insertAttendanceRecords(listOf(AttendanceRecordEntity(year, date, roll, status, isSynced = true)))
         return true
     }
@@ -95,12 +90,6 @@ class ClassRollRepository(
         return dao.getAllAttendanceAllYears()
     }
 
-    // Replaces everything on the phone with the given backup.
-    //  - Refuses an empty backup, so picking the wrong file (or restoring from a
-    //    brand-new empty cloud account) can never wipe real data.
-    //  - Runs as ONE database transaction: either the old data is fully replaced
-    //    or nothing changes. Before, it was four separate steps, so an interruption
-    //    in the middle could leave the app with the old data deleted and nothing restored.
     suspend fun restoreBackupData(students: List<StudentEntity>, records: List<AttendanceRecordEntity>) {
         if (students.isEmpty() && records.isEmpty()) {
             throw IllegalArgumentException(
@@ -123,10 +112,5 @@ class ClassRollRepository(
 
     suspend fun updateAppTheme(theme: String) {
         settingsRepo.updateAppTheme(theme)
-    }
-
-    suspend fun fetchYears(): List<String> {
-        // Local only fallback, or could query DB
-        return emptyList()
     }
 }

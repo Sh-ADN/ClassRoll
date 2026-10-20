@@ -26,25 +26,32 @@ fun ImportStudentsScreen(viewModel: ClassRollViewModel) {
     val context = LocalContext.current
     val clipboardManager = LocalClipboardManager.current
     val currentYear by viewModel.currentYear.collectAsStateWithLifecycle()
-    
+
     val sampleCsv = "Roll,Name\n1,John Doe\n2,Jane Smith\n3,Alex Johnson"
 
     val launcher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
         if (uri != null) {
             try {
                 context.contentResolver.openInputStream(uri)?.use { stream ->
-                    val reader = BufferedReader(InputStreamReader(stream))
+                    val reader = BufferedReader(InputStreamReader(stream, Charsets.UTF_8))
                     val parsed = mutableListOf<RemoteStudent>()
                     reader.useLines { lines ->
-                        var isHeader = true
-                        for (line in lines) {
-                            if (isHeader) { isHeader = false; continue }
-                            val parts = line.split(",")
+                        var checkedFirstNonBlank = false
+                        for (rawLine in lines) {
+                            val cleanLine = rawLine.removePrefix("\uFEFF").trim()
+                            if (cleanLine.isEmpty()) continue
+                            val parts = parseCsvLine(cleanLine)
                             if (parts.size >= 2) {
-                                val roll = parts[0].trim()
-                                val name = parts[1].trim()
-                                if (roll.isNotEmpty() && name.isNotEmpty()) {
-                                    parsed.add(RemoteStudent(roll = roll, name = name))
+                                val firstCol = parts[0].trim()
+                                val secondCol = parts[1].trim()
+                                if (!checkedFirstNonBlank) {
+                                    checkedFirstNonBlank = true
+                                    if (isHeaderRow(firstCol, secondCol)) {
+                                        continue
+                                    }
+                                }
+                                if (firstCol.isNotEmpty() && secondCol.isNotEmpty()) {
+                                    parsed.add(RemoteStudent(roll = firstCol, name = secondCol))
                                 }
                             }
                         }
@@ -66,7 +73,7 @@ fun ImportStudentsScreen(viewModel: ClassRollViewModel) {
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
-        
+
         Spacer(modifier = Modifier.height(12.dp))
 
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -85,11 +92,11 @@ fun ImportStudentsScreen(viewModel: ClassRollViewModel) {
         if (statusMessage.isNotEmpty()) {
             Text(statusMessage, modifier = Modifier.padding(vertical = 8.dp), color = MaterialTheme.colorScheme.primary)
         }
-        
+
         if (previewStudents.isNotEmpty()) {
             Spacer(modifier = Modifier.height(8.dp))
             Text("Preview (${previewStudents.size} students):", style = MaterialTheme.typography.titleMedium)
-            
+
             LazyColumn(modifier = Modifier.weight(1f).padding(top = 8.dp)) {
                 items(previewStudents) { student ->
                     ListItem(
@@ -98,9 +105,9 @@ fun ImportStudentsScreen(viewModel: ClassRollViewModel) {
                     )
                 }
             }
-            
+
             Button(
-                onClick = { 
+                onClick = {
                     statusMessage = "Importing..."
                     viewModel.importStudents(currentYear, previewStudents) { result ->
                         statusMessage = if (result == "Success") "Import successful!" else "Import failed: $result"
@@ -109,8 +116,44 @@ fun ImportStudentsScreen(viewModel: ClassRollViewModel) {
                 modifier = Modifier.fillMaxWidth().padding(top = 16.dp),
                 enabled = currentYear.isNotBlank()
             ) {
-                Text("Import to ${if(currentYear.isNotBlank()) currentYear else "Select Year in Settings"}")
+                Text("Import to ${if (currentYear.isNotBlank()) currentYear else "Select Year in Settings"}")
             }
         }
     }
+}
+
+private fun isHeaderRow(col1: String, col2: String): Boolean {
+    val c1 = col1.lowercase()
+    val c2 = col2.lowercase()
+    val headerFirstCols = setOf("roll", "roll no", "roll no.", "roll number", "id", "student id", "sl", "serial")
+    val headerSecondCols = setOf("name", "student name", "full name", "student")
+    return c1 in headerFirstCols || c2 in headerSecondCols
+}
+
+private fun parseCsvLine(line: String): List<String> {
+    val fields = mutableListOf<String>()
+    val sb = StringBuilder()
+    var inQuotes = false
+    var i = 0
+    while (i < line.length) {
+        val ch = line[i]
+        when {
+            ch == '"' -> {
+                if (inQuotes && i + 1 < line.length && line[i + 1] == '"') {
+                    sb.append('"')
+                    i++
+                } else {
+                    inQuotes = !inQuotes
+                }
+            }
+            ch == ',' && !inQuotes -> {
+                fields.add(sb.toString().trim())
+                sb.setLength(0)
+            }
+            else -> sb.append(ch)
+        }
+        i++
+    }
+    fields.add(sb.toString().trim())
+    return fields
 }

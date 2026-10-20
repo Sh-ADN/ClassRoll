@@ -10,6 +10,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aistudio.classroll.jkmxlp.data.AttendanceRecordEntity
@@ -194,6 +195,9 @@ fun HomeScreen(viewModel: ClassRollViewModel) {
     }
 
     if (currentIndex >= activeStudents.size) {
+        val isDark = MaterialTheme.colorScheme.background.luminance() < 0.5f
+        val presentColor = if (isDark) Color(0xFF81C784) else Color(0xFF2E7D32)
+        val absentColor = if (isDark) Color(0xFFFF8A80) else Color(0xFFC62828)
         val presentCount = dateRecords.count { it.status == "P" }
         val absentCount = dateRecords.count { it.status == "A" }
         Column(Modifier.fillMaxSize().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
@@ -206,9 +210,9 @@ fun HomeScreen(viewModel: ClassRollViewModel) {
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
             ) {
                 Column(Modifier.padding(24.dp).fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("Present: $presentCount", style = MaterialTheme.typography.titleLarge, color = Color(0xFF2E7D32))
+                    Text("Present: $presentCount", style = MaterialTheme.typography.titleLarge, color = presentColor)
                     Spacer(Modifier.height(8.dp))
-                    Text("Absent: $absentCount", style = MaterialTheme.typography.titleLarge, color = Color(0xFFC62828))
+                    Text("Absent: $absentCount", style = MaterialTheme.typography.titleLarge, color = absentColor)
                 }
             }
             Spacer(Modifier.height(32.dp))
@@ -357,11 +361,12 @@ private fun SwipeableStudentCard(
     val attendanceRate = if (totalSessions > 0) (presentCount.toFloat() / totalSessions.toFloat()) else 1.0f
     val ratePercentage = (attendanceRate * 100).toInt()
 
+    val isDark = MaterialTheme.colorScheme.background.luminance() < 0.5f
     val rateColor = when {
         totalSessions == 0 -> MaterialTheme.colorScheme.primary
-        ratePercentage >= 75 -> Color(0xFF2E7D32)
-        ratePercentage >= 60 -> Color(0xFFF57C00)
-        else -> Color(0xFFC62828)
+        ratePercentage >= 75 -> if (isDark) Color(0xFF81C784) else Color(0xFF2E7D32)
+        ratePercentage >= 60 -> if (isDark) Color(0xFFFFB74D) else Color(0xFFF57C00)
+        else -> if (isDark) Color(0xFFFF8A80) else Color(0xFFC62828)
     }
 
     // --- 2. Streak Calculation ---
@@ -378,6 +383,16 @@ private fun SwipeableStudentCard(
         currentStreakStatus == "P" -> "🔥 $streakCount Session Present Streak"
         currentStreakStatus == "A" -> "⚠️ $streakCount Session Absence Streak"
         else -> "No history"
+    }
+    val streakBgColor = if (currentStreakStatus == "A") {
+        if (isDark) Color(0xFF3E1A1E) else Color(0xFFFFEBEE)
+    } else {
+        if (isDark) Color(0xFF193623) else Color(0xFFE8F5E9)
+    }
+    val streakTextColor = if (currentStreakStatus == "A") {
+        if (isDark) Color(0xFFFF8A80) else Color(0xFFC62828)
+    } else {
+        if (isDark) Color(0xFF81C784) else Color(0xFF2E7D32)
     }
 
     // --- 3. Last Recorded Status ---
@@ -398,7 +413,7 @@ private fun SwipeableStudentCard(
                 val color = when (dismissState.targetValue) {
                     SwipeToDismissBoxValue.StartToEnd -> Color(0xFF4CAF50)
                     SwipeToDismissBoxValue.EndToStart -> Color(0xFFF44336)
-                    else -> Color.LightGray
+                    else -> MaterialTheme.colorScheme.surfaceVariant
                 }
                 val alignment = when (dismissState.targetValue) {
                     SwipeToDismissBoxValue.StartToEnd -> Alignment.CenterStart
@@ -457,12 +472,12 @@ private fun SwipeableStudentCard(
                         // Streak Badge (Insight 2)
                         Surface(
                             shape = MaterialTheme.shapes.small,
-                            color = if (currentStreakStatus == "A") Color(0xFFFFEBEE) else Color(0xFFE8F5E9)
+                            color = streakBgColor
                         ) {
                             Text(
                                 text = streakBadgeText,
                                 style = MaterialTheme.typography.labelMedium,
-                                color = if (currentStreakStatus == "A") Color(0xFFC62828) else Color(0xFF2E7D32),
+                                color = streakTextColor,
                                 modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
                             )
                         }
