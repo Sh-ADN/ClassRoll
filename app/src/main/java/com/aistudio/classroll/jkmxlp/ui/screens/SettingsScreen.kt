@@ -1,10 +1,15 @@
 package com.aistudio.classroll.jkmxlp.ui.screens
 
+import android.Manifest
 import android.app.Activity
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.os.Build
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -48,6 +53,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -60,9 +66,16 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.core.app.NotificationManagerCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aistudio.classroll.jkmxlp.data.AuthManager
 import com.aistudio.classroll.jkmxlp.ui.ClassRollViewModel
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import java.util.concurrent.TimeUnit
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -93,6 +106,81 @@ fun SettingsScreen(
 
     var showClearAttendanceDialog by remember { mutableStateOf(false) }
     var showClearStudentsDialog by remember { mutableStateOf(false) }
+
+    // Which restore ("cloud", "file" or "paste") is waiting for the user to confirm.
+    var pendingRestore by remember { mutableStateOf<String?>(null) }
+    // Backup text waiting to be written once the user has picked where to save it.
+    var pendingExportJson by remember { mutableStateOf("") }
+
+    // Year buttons come from years that actually have data (plus this year), so the
+    // list keeps up on its own instead of stopping at a hardcoded year.
+    val calendarYear = remember { SimpleDateFormat("yyyy", Locale.US).format(Date()) }
+    val yearChoices = remember(availableYears, currentYear, calendarYear) {
+        (availableYears + currentYear + calendarYear).filter { it.isNotBlank() }.distinct().sorted()
+    }
+    LaunchedEffect(Unit) {
+        viewModel.loadAvailableYears()
+    }
+
+    // Saving a backup to a file the user chooses (Storage Access Framework).
+    val saveFileLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/json")
+    ) { uri ->
+        if (uri != null && pendingExportJson.isNotBlank()) {
+            try {
+                context.contentResolver.openOutputStream(uri)?.use { out ->
+                    out.write(pendingExportJson.toByteArray(Charsets.UTF_8))
+                }
+                viewModel.markBackupDone()
+                statusMessage = "Backup saved to file."
+            } catch (e: Exception) {
+                statusMessage = "Failed to save backup file: ${e.message}"
+            }
+        }
+        pendingExportJson = ""
+    }
+
+    // Loading a backup from a file. Reading happens off the main thread.
+    val openFileLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) {
+            scope.launch {
+                try {
+                    val json = withContext(Dispatchers.IO) {
+                        context.contentResolver.openInputStream(uri)
+                            ?.bufferedReader(Charsets.UTF_8)
+                            ?.use { it.readText() }
+                            ?.removePrefix("\uFEFF")
+                            ?: ""
+                    }
+                    if (json.isBlank()) {
+                        statusMessage = "The selected file was empty."
+                    } else {
+                        viewModel.restoreBackupJson(json) { _, msg -> statusMessage = msg }
+                    }
+                } catch (e: Exception) {
+                    statusMessage = "Failed to read backup file: ${e.message}"
+                }
+            }
+        }
+    }
+
+    // Android 13+ keeps notifications off until the user allows them, so the
+    // reminder has to ask. Without this, the daily reminder never appears.
+    var notificationsAllowed by remember {
+        mutableStateOf(NotificationManagerCompat.from(context).areNotificationsEnabled())
+    }
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        notificationsAllowed = NotificationManagerCompat.from(context).areNotificationsEnabled()
+        if (granted) {
+            viewModel.setReminderEnabled(true)
+        } else {
+            statusMessage = "Reminders need notification permission. Allow notifications for this app in your phone's Settings."
+        }
+    }
 
     val daysSinceBackup = if (lastBackupTimestamp > 0L) {
         TimeUnit.MILLISECONDS.toDays(System.currentTimeMillis() - lastBackupTimestamp)
@@ -127,8 +215,11 @@ fun SettingsScreen(
                     Text("Current active year: $currentYear", style = MaterialTheme.typography.bodyMedium)
                     Spacer(modifier = Modifier.height(8.dp))
 
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        listOf("2024", "2025", "2026", "2027").forEach { yr ->
+                    Row(
+                        modifier = Modifier.horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        yearChoices.forEach { yr ->
                             FilterChip(
                                 selected = currentYear == yr,
                                 onClick = { viewModel.updateSettings(yr) },
@@ -256,9 +347,7 @@ fun SettingsScreen(
                                     if (currentUser == null) {
                                         statusMessage = "Please sign in with Google to pull from cloud."
                                     } else {
-                                        viewModel.restoreFromCloud { success, msg ->
-                                            statusMessage = msg
-                                        }
+                                        pendingRestore = "cloud"
                                     }
                                 },
                                 modifier = Modifier
@@ -326,9 +415,35 @@ fun SettingsScreen(
                         }
                         Switch(
                             checked = reminderEnabled,
-                            onCheckedChange = { viewModel.setReminderEnabled(it) },
+                            onCheckedChange = { turnOn ->
+                                if (!turnOn) {
+                                    viewModel.setReminderEnabled(false)
+                                } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                                    !NotificationManagerCompat.from(context).areNotificationsEnabled()
+                                ) {
+                                    notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                                } else {
+                                    viewModel.setReminderEnabled(true)
+                                }
+                            },
                             modifier = Modifier.testTag("reminder_toggle")
                         )
+                    }
+
+                    if (reminderEnabled && !notificationsAllowed &&
+                        Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
+                    ) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            "Notifications are blocked for this app, so the reminder cannot appear.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error
+                        )
+                        TextButton(onClick = {
+                            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                        }) {
+                            Text("Allow notifications")
+                        }
                     }
 
                     if (reminderEnabled) {
@@ -378,23 +493,54 @@ fun SettingsScreen(
                         Button(
                             onClick = {
                                 viewModel.exportBackupJson { json ->
+                                    if (json.isBlank()) {
+                                        statusMessage = "Could not create the backup."
+                                    } else {
+                                        pendingExportJson = json
+                                        val stamp = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
+                                        saveFileLauncher.launch("classroll_backup_$stamp.json")
+                                    }
+                                }
+                            },
+                            modifier = Modifier.weight(1f).testTag("save_backup_file_button")
+                        ) {
+                            Text("Save to File")
+                        }
+
+                        OutlinedButton(
+                            onClick = { pendingRestore = "file" },
+                            modifier = Modifier.weight(1f).testTag("load_backup_file_button")
+                        ) {
+                            Text("Load from File")
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(4.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        TextButton(
+                            onClick = {
+                                viewModel.exportBackupJson { json ->
                                     backupJsonText = json
                                     showExportBackupDialog = true
                                 }
                             },
                             modifier = Modifier.weight(1f).testTag("export_json_button")
                         ) {
-                            Text("Export JSON")
+                            Text("Copy as text")
                         }
 
-                        OutlinedButton(
+                        TextButton(
                             onClick = {
                                 restoreInputText = ""
                                 showRestoreBackupDialog = true
                             },
                             modifier = Modifier.weight(1f).testTag("restore_json_button")
                         ) {
-                            Text("Restore JSON")
+                            Text("Paste text")
                         }
                     }
                 }
@@ -458,10 +604,14 @@ fun SettingsScreen(
             title = { Text("Backup JSON") },
             text = {
                 Column {
-                    Text("Copy this backup text to keep a safe copy:", style = MaterialTheme.typography.bodySmall)
+                    Text(
+                        "Copy copies the whole backup (${backupJsonText.length / 1024} KB). " +
+                            "Only the start is shown here, because showing all of it would be slow.",
+                        style = MaterialTheme.typography.bodySmall
+                    )
                     Spacer(modifier = Modifier.height(8.dp))
                     OutlinedTextField(
-                        value = backupJsonText,
+                        value = backupJsonText.take(2000) + if (backupJsonText.length > 2000) "\n..." else "",
                         onValueChange = {},
                         readOnly = true,
                         modifier = Modifier.fillMaxWidth().height(200.dp)
@@ -470,10 +620,15 @@ fun SettingsScreen(
             },
             confirmButton = {
                 Button(onClick = {
-                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                    clipboard.setPrimaryClip(ClipData.newPlainText("ClassRoll Backup", backupJsonText))
-                    Toast.makeText(context, "Backup copied to Clipboard!", Toast.LENGTH_SHORT).show()
-                    viewModel.markBackupDone()
+                    try {
+                        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                        clipboard.setPrimaryClip(ClipData.newPlainText("ClassRoll Backup", backupJsonText))
+                        Toast.makeText(context, "Backup copied to Clipboard!", Toast.LENGTH_SHORT).show()
+                        viewModel.markBackupDone()
+                    } catch (e: Exception) {
+                        // Very large text cannot be placed on the Android clipboard.
+                        Toast.makeText(context, "Too large to copy. Use \"Save to File\" instead.", Toast.LENGTH_LONG).show()
+                    }
                     showExportBackupDialog = false
                 }) {
                     Text("Copy to Clipboard")
@@ -507,10 +662,8 @@ fun SettingsScreen(
             confirmButton = {
                 Button(onClick = {
                     if (restoreInputText.isNotBlank()) {
-                        viewModel.restoreBackupJson(restoreInputText) { success, msg ->
-                            statusMessage = msg
-                        }
                         showRestoreBackupDialog = false
+                        pendingRestore = "paste"
                     }
                 }) {
                     Text("Restore")
@@ -518,6 +671,48 @@ fun SettingsScreen(
             },
             dismissButton = {
                 TextButton(onClick = { showRestoreBackupDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    // Shared confirmation for every kind of restore.
+    if (pendingRestore != null) {
+        AlertDialog(
+            onDismissRequest = { pendingRestore = null },
+            title = { Text("Replace all data on this phone?") },
+            text = {
+                Text(
+                    "Restoring erases everything currently stored in the app (students and " +
+                        "attendance) and replaces it with the backup. This cannot be undone. " +
+                        "If you are not sure, cancel and save a backup of your current data first."
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val which = pendingRestore
+                        pendingRestore = null
+                        when (which) {
+                            "cloud" -> viewModel.restoreFromCloud { _, msg -> statusMessage = msg }
+                            "file" -> openFileLauncher.launch(
+                                arrayOf("application/json", "text/*", "application/octet-stream")
+                            )
+                            "paste" -> {
+                                val text = restoreInputText
+                                restoreInputText = ""
+                                viewModel.restoreBackupJson(text) { _, msg -> statusMessage = msg }
+                            }
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                ) {
+                    Text("Replace data")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingRestore = null }) {
                     Text("Cancel")
                 }
             }
