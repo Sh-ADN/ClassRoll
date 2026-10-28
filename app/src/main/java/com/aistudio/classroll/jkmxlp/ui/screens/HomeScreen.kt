@@ -26,7 +26,7 @@ import java.util.Locale
 @Composable
 fun HomeScreen(viewModel: ClassRollViewModel) {
     val students by viewModel.students.collectAsStateWithLifecycle()
-    val activeStudents = remember(students) { students.filter { it.name.isNotBlank() } }
+    val activeStudents = remember(students) { students.filter { it.name.isNotBlank() && it.active } }
     val currentYear by viewModel.currentYear.collectAsStateWithLifecycle()
     val holidays by viewModel.holidays.collectAsStateWithLifecycle()
     var currentIndex by remember { mutableStateOf(0) }
@@ -89,8 +89,11 @@ fun HomeScreen(viewModel: ClassRollViewModel) {
     }
 
     if (activeStudents.isEmpty()) {
-        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text("No students found. Import students first.")
+        Box(Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
+            Text(
+                if (students.isEmpty()) "No students found. Import students first."
+                else "No active students for daily roll call. You can mark students Active in the Register tab (Edit Mode)."
+            )
         }
         return
     }

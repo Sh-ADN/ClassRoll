@@ -78,12 +78,14 @@ fun RegisterScreen(viewModel: ClassRollViewModel) {
     var showStudentDialog by remember { mutableStateOf(false) }
     var editingStudentRoll by remember { mutableStateOf("") }
     var editingStudentName by remember { mutableStateOf("") }
+    var editingStudentActive by remember { mutableStateOf(true) }
     
     var showExportMenu by remember { mutableStateOf(false) }
     var summaryDate by remember { mutableStateOf<String?>(null) }
     
-    // Holiday toggle confirmation & 5-second undo state
+    // Holiday toggle confirmation, Clear Day's Attendance confirmation & 5-second undo state
     var holidayConfirmDate by remember { mutableStateOf<String?>(null) }
+    var clearAttendanceConfirmDate by remember { mutableStateOf<String?>(null) }
     var undoDate by remember { mutableStateOf<String?>(null) }
     var undoMessage by remember { mutableStateOf("") }
     var undoRemainingSeconds by remember { mutableIntStateOf(5) }
@@ -170,9 +172,10 @@ fun RegisterScreen(viewModel: ClassRollViewModel) {
 
     // Add / Edit Student Dialog
     if (showStudentDialog && isEditMode) {
+        val isExistingStudent = editingStudentRoll.isNotBlank() && students.any { it.roll == editingStudentRoll }
         AlertDialog(
             onDismissRequest = { showStudentDialog = false },
-            title = { Text(if (editingStudentRoll.isNotBlank() && students.any { it.roll == editingStudentRoll }) "Edit Student" else "Add Student") },
+            title = { Text(if (isExistingStudent) "Edit Student" else "Add Student") },
             text = {
                 Column {
                     OutlinedTextField(
@@ -188,12 +191,50 @@ fun RegisterScreen(viewModel: ClassRollViewModel) {
                         label = { Text("Name") },
                         modifier = Modifier.fillMaxWidth()
                     )
+                    Spacer(Modifier.height(12.dp))
+                    Surface(
+                        color = MaterialTheme.colorScheme.surfaceVariant,
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { editingStudentActive = !editingStudentActive }
+                                .padding(horizontal = 12.dp, vertical = 10.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                                Text(
+                                    text = if (editingStudentActive) "Status: Active" else "Status: Inactive (Left Class)",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = if (editingStudentActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
+                                )
+                                Text(
+                                    text = if (editingStudentActive) {
+                                        "Included in daily Home roll call."
+                                    } else {
+                                        "Skipped in daily roll call from now on. Past attendance & fine history are kept."
+                                    },
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            Switch(
+                                checked = editingStudentActive,
+                                onCheckedChange = { editingStudentActive = it },
+                                modifier = Modifier.testTag("student_active_switch")
+                            )
+                        }
+                    }
                 }
             },
             confirmButton = {
                 TextButton(onClick = {
                     if (editingStudentRoll.isNotBlank()) {
-                        viewModel.addOrUpdateStudent(editingStudentRoll, editingStudentName)
+                        viewModel.addOrUpdateStudent(editingStudentRoll, editingStudentName, editingStudentActive)
                     }
                     showStudentDialog = false
                 }) {
@@ -202,7 +243,7 @@ fun RegisterScreen(viewModel: ClassRollViewModel) {
             },
             dismissButton = {
                 Row {
-                    if (editingStudentRoll.isNotBlank() && students.any { it.roll == editingStudentRoll }) {
+                    if (isExistingStudent) {
                         TextButton(onClick = {
                             viewModel.deleteStudent(editingStudentRoll)
                             showStudentDialog = false
@@ -221,7 +262,7 @@ fun RegisterScreen(viewModel: ClassRollViewModel) {
     // Holiday Toggle Confirmation Dialog
     if (holidayConfirmDate != null && isEditMode) {
         val confirmDate = holidayConfirmDate!!
-        val activeStudents = remember(students) { students.filter { it.name.isNotBlank() } }
+        val activeStudents = remember(students) { students.filter { it.name.isNotBlank() && it.active } }
         val presentCount = activeStudents.count { attendanceMap[it.roll]?.get(confirmDate)?.status == "P" }
         val absentCount = activeStudents.count { attendanceMap[it.roll]?.get(confirmDate)?.status == "A" }
         val isAlreadyHoliday = holidays.contains(confirmDate)
@@ -290,12 +331,81 @@ fun RegisterScreen(viewModel: ClassRollViewModel) {
         )
     }
 
+    // Clear Day's Attendance Confirmation Dialog
+    if (clearAttendanceConfirmDate != null && isEditMode) {
+        val targetDate = clearAttendanceConfirmDate!!
+        val presentOnDate = attendanceRecords.count { it.date == targetDate && it.status == "P" }
+        val absentOnDate = attendanceRecords.count { it.date == targetDate && it.status == "A" }
+        val totalOnDate = presentOnDate + absentOnDate
+
+        AlertDialog(
+            onDismissRequest = { clearAttendanceConfirmDate = null },
+            icon = {
+                Icon(
+                    imageVector = Icons.Default.Warning,
+                    contentDescription = "Clear Attendance Warning",
+                    tint = MaterialTheme.colorScheme.error
+                )
+            },
+            title = {
+                Text(
+                    text = "Clear Day's Attendance?",
+                    style = MaterialTheme.typography.titleMedium
+                )
+            },
+            text = {
+                Column {
+                    Text(
+                        text = "Date: ${formatFullDisplayDate(targetDate)}",
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        text = "This will remove all $totalOnDate recorded entry(s) ($presentOnDate Present, $absentOnDate Absent) for this date so the column is completely blank.",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        viewModel.clearAttendanceForDate(targetDate)
+                        clearAttendanceConfirmDate = null
+                        summaryDate = null
+                        android.widget.Toast.makeText(
+                            context,
+                            "Cleared attendance for ${formatFullDisplayDate(targetDate)}",
+                            android.widget.Toast.LENGTH_SHORT
+                        ).show()
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.error,
+                        contentColor = MaterialTheme.colorScheme.onError
+                    ),
+                    modifier = Modifier.testTag("confirm_clear_day_attendance_button")
+                ) {
+                    Text("Yes, Clear Day")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { clearAttendanceConfirmDate = null }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
     // Date Press-and-Hold Summary Dialog
-    if (summaryDate != null && holidayConfirmDate == null) {
+    if (summaryDate != null && holidayConfirmDate == null && clearAttendanceConfirmDate == null) {
         val selDate = summaryDate!!
         val isCustomHoliday = holidays.contains(selDate)
         val isWeekendDay = isWeekend(selDate)
-        val activeStudents = remember(students) { students.filter { it.name.isNotBlank() } }
+        val activeStudents = remember(students, attendanceMap, selDate) {
+            students.filter {
+                it.name.isNotBlank() && (it.active || attendanceMap[it.roll]?.get(selDate)?.status?.isNotBlank() == true)
+            }
+        }
         val totalStudents = activeStudents.size
         
         val presentList = remember(activeStudents, attendanceMap, selDate) {
@@ -305,6 +415,9 @@ fun RegisterScreen(viewModel: ClassRollViewModel) {
             activeStudents.filter { attendanceMap[it.roll]?.get(selDate)?.status == "A" }
         }
         val unmarkedCount = (totalStudents - presentList.size - absentList.size).coerceAtLeast(0)
+        val totalRecordedOnDate = remember(attendanceRecords, selDate) {
+            attendanceRecords.count { it.date == selDate && it.status.isNotBlank() }
+        }
 
         val isDark = MaterialTheme.colorScheme.background.luminance() < 0.5f
         val presentMetricColor = if (isDark) Color(0xFF81C784) else Color(0xFF2E7D32)
@@ -453,6 +566,20 @@ fun RegisterScreen(viewModel: ClassRollViewModel) {
                             color = MaterialTheme.colorScheme.outline
                         )
                     }
+
+                    // In Edit Mode, if any attendance is recorded on this date, allow clearing the entire day
+                    if (isEditMode && totalRecordedOnDate > 0) {
+                        Spacer(Modifier.height(14.dp))
+                        OutlinedButton(
+                            onClick = { clearAttendanceConfirmDate = selDate },
+                            colors = ButtonDefaults.outlinedButtonColors(
+                                contentColor = MaterialTheme.colorScheme.error
+                            ),
+                            modifier = Modifier.fillMaxWidth().testTag("clear_day_attendance_button")
+                        ) {
+                            Text("🗑️ Clear Day's Attendance ($totalRecordedOnDate recorded)")
+                        }
+                    }
                 }
             },
             confirmButton = {
@@ -507,6 +634,7 @@ fun RegisterScreen(viewModel: ClassRollViewModel) {
                     onClick = {
                         editingStudentRoll = ""
                         editingStudentName = ""
+                        editingStudentActive = true
                         showStudentDialog = true
                     },
                     modifier = Modifier.testTag("add_student_fab")
@@ -669,7 +797,7 @@ fun RegisterScreen(viewModel: ClassRollViewModel) {
                     Spacer(Modifier.width(4.dp))
                     Text(
                         text = if (isEditMode) {
-                            "Edit Mode Active: Tap cells to change P/A, tap student to edit, or tap date header for holiday."
+                            "Edit Mode Active: Tap cells to change P/A, tap student to edit/set Inactive, or tap date header."
                         } else {
                             "View Only: Register is locked against accidental taps. Tap a date header to view daily summary."
                         },
@@ -775,6 +903,10 @@ fun RegisterScreen(viewModel: ClassRollViewModel) {
                                         Modifier
                                             .width(130.dp)
                                             .fillMaxHeight()
+                                            .background(
+                                                if (!student.active) MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
+                                                else Color.Transparent
+                                            )
                                             .border(1.dp, gridBorderColor)
                                             .padding(4.dp)
                                             .then(
@@ -782,6 +914,7 @@ fun RegisterScreen(viewModel: ClassRollViewModel) {
                                                     Modifier.clickable {
                                                         editingStudentRoll = student.roll
                                                         editingStudentName = student.name
+                                                        editingStudentActive = student.active
                                                         showStudentDialog = true
                                                     }
                                                 } else {
@@ -790,12 +923,22 @@ fun RegisterScreen(viewModel: ClassRollViewModel) {
                                             ),
                                         contentAlignment = Alignment.CenterStart
                                     ) {
-                                        Text(
-                                            "${student.roll} ${student.name}",
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis,
-                                            style = MaterialTheme.typography.bodySmall
-                                        )
+                                        Column {
+                                            Text(
+                                                "${student.roll} ${student.name}",
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = if (student.active) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                            if (!student.active) {
+                                                Text(
+                                                    "Inactive",
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    color = MaterialTheme.colorScheme.error
+                                                )
+                                            }
+                                        }
                                     }
 
                                     // Attendance Cells Row

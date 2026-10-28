@@ -208,13 +208,13 @@ class ClassRollViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
-    fun addOrUpdateStudent(roll: String, name: String) {
+    fun addOrUpdateStudent(roll: String, name: String, active: Boolean = true) {
         viewModelScope.launch {
             val year = currentYear.value
             if (year.isNotBlank()) {
-                repository.addOrUpdateStudent(year, roll, name)
+                repository.addOrUpdateStudent(year, roll, name, active)
                 try {
-                    firestoreRepo.saveStudent(StudentEntity(year, roll, name, true))
+                    firestoreRepo.saveStudent(StudentEntity(year, roll, name, active))
                 } catch (e: Exception) {
                     // Ignore background sync errors
                 }

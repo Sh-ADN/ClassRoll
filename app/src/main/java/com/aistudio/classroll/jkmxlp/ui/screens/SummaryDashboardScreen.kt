@@ -254,6 +254,10 @@ fun SummaryDashboardScreen(viewModel: ClassRollViewModel) {
             val lastRecordMonth = lastRecordDate?.takeIf { it.length >= 7 }?.substring(0, 7)
 
             val (statusText, isActive) = when {
+                !student.active && lastRecordDate != null ->
+                    "Inactive (ends ${formatShortDayMonth(lastRecordDate)})" to false
+                !student.active ->
+                    "Inactive" to false
                 records.isEmpty() -> "Not in ClassRoll" to false
                 presentCount == 0 && lastRecordMonth != null && latestClassMonth != null && lastRecordMonth < latestClassMonth ->
                     "No attendance (ends ${formatShortDayMonth(lastRecordDate)})" to false

@@ -42,8 +42,8 @@ class ClassRollRepository(
         return true
     }
 
-    suspend fun addOrUpdateStudent(year: String, roll: String, name: String) {
-        dao.insertStudents(listOf(StudentEntity(year = year, roll = roll, name = name, active = true)))
+    suspend fun addOrUpdateStudent(year: String, roll: String, name: String, active: Boolean = true) {
+        dao.insertStudents(listOf(StudentEntity(year = year, roll = roll, name = name, active = active)))
     }
 
     // Deletes both the student and all of their attendance records for that year
