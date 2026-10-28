@@ -5,6 +5,7 @@ import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
@@ -23,6 +24,7 @@ class SettingsRepository(private val context: Context) {
         val REMINDER_TIME = stringPreferencesKey("reminder_time") // "HH:mm", 24h
         val CUSTOM_HOLIDAYS = stringSetPreferencesKey("custom_holidays")
         val OFFLINE_MODE = booleanPreferencesKey("offline_mode")
+        val FINE_PER_ABSENT_DAY = intPreferencesKey("fine_per_absent_day")
     }
 
     val appThemeFlow: Flow<String> = context.dataStore.data.map { preferences ->
@@ -56,6 +58,16 @@ class SettingsRepository(private val context: Context) {
 
     val offlineModeFlow: Flow<Boolean> = context.dataStore.data.map { preferences ->
         preferences[OFFLINE_MODE] ?: false
+    }
+
+    val finePerAbsentDayFlow: Flow<Int> = context.dataStore.data.map { preferences ->
+        preferences[FINE_PER_ABSENT_DAY] ?: 5
+    }
+
+    suspend fun updateFinePerAbsentDay(amount: Int) {
+        context.dataStore.edit { preferences ->
+            preferences[FINE_PER_ABSENT_DAY] = amount.coerceAtLeast(0)
+        }
     }
 
     suspend fun updateAcademicYear(year: String) {

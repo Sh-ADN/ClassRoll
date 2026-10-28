@@ -69,6 +69,13 @@ class ClassRollViewModel(application: Application) : AndroidViewModel(applicatio
     val reminderEnabled = settingsRepo.reminderEnabledFlow.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
     val reminderTime = settingsRepo.reminderTimeFlow.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "10:00")
     val holidays: StateFlow<Set<String>> = settingsRepo.holidaysFlow.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptySet())
+    val finePerAbsentDay: StateFlow<Int> = settingsRepo.finePerAbsentDayFlow.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 5)
+
+    fun updateFinePerAbsentDay(amount: Int) {
+        viewModelScope.launch {
+            settingsRepo.updateFinePerAbsentDay(amount)
+        }
+    }
 
     fun toggleHoliday(date: String) {
         viewModelScope.launch {

@@ -16,10 +16,13 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.ArrowForward
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -31,6 +34,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -46,6 +50,7 @@ import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun RegisterScreen(viewModel: ClassRollViewModel) {
     val students by viewModel.students.collectAsStateWithLifecycle()
@@ -66,6 +71,9 @@ fun RegisterScreen(viewModel: ClassRollViewModel) {
         attendanceRecords.groupBy { it.roll }.mapValues { (_, records) -> records.associateBy { it.date } }
     }
     
+    // Default mode is View (false) to prevent accidental/unintentional edits
+    var isEditMode by remember { mutableStateOf(false) }
+
     var searchQuery by remember { mutableStateOf("") }
     var showStudentDialog by remember { mutableStateOf(false) }
     var editingStudentRoll by remember { mutableStateOf("") }
@@ -161,7 +169,7 @@ fun RegisterScreen(viewModel: ClassRollViewModel) {
     }
 
     // Add / Edit Student Dialog
-    if (showStudentDialog) {
+    if (showStudentDialog && isEditMode) {
         AlertDialog(
             onDismissRequest = { showStudentDialog = false },
             title = { Text(if (editingStudentRoll.isNotBlank() && students.any { it.roll == editingStudentRoll }) "Edit Student" else "Add Student") },
@@ -211,7 +219,7 @@ fun RegisterScreen(viewModel: ClassRollViewModel) {
     }
 
     // Holiday Toggle Confirmation Dialog
-    if (holidayConfirmDate != null) {
+    if (holidayConfirmDate != null && isEditMode) {
         val confirmDate = holidayConfirmDate!!
         val activeStudents = remember(students) { students.filter { it.name.isNotBlank() } }
         val presentCount = activeStudents.count { attendanceMap[it.roll]?.get(confirmDate)?.status == "P" }
@@ -450,10 +458,21 @@ fun RegisterScreen(viewModel: ClassRollViewModel) {
             confirmButton = {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                     if (!isWeekendDay) {
-                        OutlinedButton(onClick = {
-                            holidayConfirmDate = selDate
-                        }) {
-                            Text(if (isCustomHoliday) "Clear Holiday" else "🌴 Toggle Holiday")
+                        if (isEditMode) {
+                            OutlinedButton(onClick = {
+                                holidayConfirmDate = selDate
+                            }) {
+                                Text(if (isCustomHoliday) "Clear Holiday" else "🌴 Toggle Holiday")
+                            }
+                        } else {
+                            OutlinedButton(
+                                onClick = {},
+                                enabled = false
+                            ) {
+                                Icon(Icons.Default.Lock, contentDescription = null, modifier = Modifier.size(14.dp))
+                                Spacer(Modifier.width(4.dp))
+                                Text("Switch to Edit Mode for Holiday", style = MaterialTheme.typography.labelSmall)
+                            }
                         }
                     }
                     TextButton(onClick = { summaryDate = null }) {
@@ -483,12 +502,17 @@ fun RegisterScreen(viewModel: ClassRollViewModel) {
 
     Scaffold(
         floatingActionButton = {
-            FloatingActionButton(onClick = { 
-                editingStudentRoll = ""
-                editingStudentName = ""
-                showStudentDialog = true 
-            }) {
-                Text("+")
+            if (isEditMode) {
+                FloatingActionButton(
+                    onClick = {
+                        editingStudentRoll = ""
+                        editingStudentName = ""
+                        showStudentDialog = true
+                    },
+                    modifier = Modifier.testTag("add_student_fab")
+                ) {
+                    Text("+")
+                }
             }
         }
     ) { innerPadding ->
@@ -502,7 +526,7 @@ fun RegisterScreen(viewModel: ClassRollViewModel) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                        .padding(horizontal = 8.dp, vertical = 2.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
@@ -577,6 +601,48 @@ fun RegisterScreen(viewModel: ClassRollViewModel) {
                     }
                 }
 
+                // View / Edit Mode Segmented Toggle Bar (Default: View Mode)
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                        SegmentedButton(
+                            selected = !isEditMode,
+                            onClick = { isEditMode = false },
+                            shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2),
+                            icon = {
+                                Icon(
+                                    imageVector = Icons.Default.Visibility,
+                                    contentDescription = "View Mode",
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            },
+                            modifier = Modifier.testTag("register_view_mode_button")
+                        ) {
+                            Text("View Mode (Locked)", style = MaterialTheme.typography.labelMedium)
+                        }
+                        SegmentedButton(
+                            selected = isEditMode,
+                            onClick = { isEditMode = true },
+                            shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2),
+                            icon = {
+                                Icon(
+                                    imageVector = Icons.Default.Edit,
+                                    contentDescription = "Edit Mode",
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            },
+                            modifier = Modifier.testTag("register_edit_mode_button")
+                        ) {
+                            Text("Edit Mode", style = MaterialTheme.typography.labelMedium)
+                        }
+                    }
+                }
+
                 // Search Bar
                 OutlinedTextField(
                     value = searchQuery,
@@ -587,7 +653,7 @@ fun RegisterScreen(viewModel: ClassRollViewModel) {
                     singleLine = true
                 )
 
-                // Hint row
+                // Dynamic Mode Status / Hint Row
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -595,16 +661,20 @@ fun RegisterScreen(viewModel: ClassRollViewModel) {
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Icon(
-                        imageVector = Icons.Default.Info,
+                        imageVector = if (isEditMode) Icons.Default.Edit else Icons.Default.Lock,
                         contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
+                        tint = if (isEditMode) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.primary,
                         modifier = Modifier.size(15.dp)
                     )
                     Spacer(Modifier.width(4.dp))
                     Text(
-                        text = "Fri & Sat are fixed weekends. Press & hold date header for summary & holiday.",
+                        text = if (isEditMode) {
+                            "Edit Mode Active: Tap cells to change P/A, tap student to edit, or tap date header for holiday."
+                        } else {
+                            "View Only: Register is locked against accidental taps. Tap a date header to view daily summary."
+                        },
                         style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        color = if (isEditMode) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
                 
@@ -707,11 +777,17 @@ fun RegisterScreen(viewModel: ClassRollViewModel) {
                                             .fillMaxHeight()
                                             .border(1.dp, gridBorderColor)
                                             .padding(4.dp)
-                                            .clickable {
-                                                editingStudentRoll = student.roll
-                                                editingStudentName = student.name
-                                                showStudentDialog = true
-                                            },
+                                            .then(
+                                                if (isEditMode) {
+                                                    Modifier.clickable {
+                                                        editingStudentRoll = student.roll
+                                                        editingStudentName = student.name
+                                                        showStudentDialog = true
+                                                    }
+                                                } else {
+                                                    Modifier
+                                                }
+                                            ),
                                         contentAlignment = Alignment.CenterStart
                                     ) {
                                         Text(
@@ -761,8 +837,8 @@ fun RegisterScreen(viewModel: ClassRollViewModel) {
                                                 else -> MaterialTheme.colorScheme.onSurface
                                             }
 
-                                            // Weekend & Custom Holidays are locked/non-editable by tapping the cell
-                                            val isCellEditable = !isWeekendDay && !isCustomHoliday
+                                            // Only editable when Edit Mode is enabled and day is not a weekend or custom holiday
+                                            val isCellEditable = isEditMode && !isWeekendDay && !isCustomHoliday
 
                                             Box(
                                                 Modifier
