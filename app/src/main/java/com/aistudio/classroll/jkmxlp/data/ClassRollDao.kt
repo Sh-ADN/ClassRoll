@@ -8,7 +8,9 @@ import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface ClassRollDao {
-    @Query("SELECT * FROM students WHERE year = :year AND active = 1 ORDER BY CAST(roll AS INTEGER) ASC")
+    // Includes students marked inactive, so they stay visible in the Register and Summary with
+    // their attendance history and fines. The Home roll call skips inactive students itself.
+    @Query("SELECT * FROM students WHERE year = :year ORDER BY CAST(roll AS INTEGER) ASC")
     fun getStudentsForYear(year: String): Flow<List<StudentEntity>>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)

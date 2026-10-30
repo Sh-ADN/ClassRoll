@@ -34,7 +34,9 @@ private data class ParsedBackup(
     val students: List<StudentEntity>,
     val records: List<AttendanceRecordEntity>,
     val explicitYear: String,
-    val holidays: Set<String>?
+    val holidays: Set<String>?,
+    val finePerAbsentDay: Int?,
+    val skippedRecords: Int
 )
 
 class ClassRollViewModel(application: Application) : AndroidViewModel(application) {
@@ -272,6 +274,7 @@ class ClassRollViewModel(application: Application) : AndroidViewModel(applicatio
                 val students = repository.getAllStudentsAllYears()
                 val records = repository.getAllAttendanceAllYears()
                 val holidaySet = settingsRepo.holidaysFlow.first()
+                val fineRate = settingsRepo.finePerAbsentDayFlow.first()
                 val activeYear = currentYear.value.ifBlank {
                     students.firstOrNull { it.year.isNotBlank() }?.year
                         ?: records.firstOrNull { it.year.isNotBlank() }?.year
@@ -283,7 +286,7 @@ class ClassRollViewModel(application: Application) : AndroidViewModel(applicatio
                 // Give up after 3 minutes instead of spinning forever when offline.
                 val finished = withTimeoutOrNull(180_000L) {
                     firestoreRepo.syncLocalToCloud(
-                        students, records, activeYear, appTheme.value, holidaySet
+                        students, records, activeYear, appTheme.value, holidaySet, fineRate
                     ) { done, total ->
                         _cloudProgress.value = if (total == 0) "" else "Uploading $done of $total..."
                     }
@@ -332,6 +335,18 @@ class ClassRollViewModel(application: Application) : AndroidViewModel(applicatio
                 }
                 if (cloudHolidays != null) {
                     settingsRepo.setHolidays(cloudHolidays)
+                }
+
+                // The fine rate is money, so it travels with the backup too.
+                val cloudFine = try {
+                    firestoreRepo.pullFinePerAbsentDay()
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    null
+                }
+                if (cloudFine != null) {
+                    settingsRepo.updateFinePerAbsentDay(cloudFine)
                 }
 
                 // Automatically restore the academic year so the UI immediately shows the records
@@ -385,6 +400,7 @@ class ClassRollViewModel(application: Application) : AndroidViewModel(applicatio
                 val students = repository.getAllStudentsAllYears()
                 val records = repository.getAllAttendanceAllYears()
                 val holidaySet = settingsRepo.holidaysFlow.first()
+                val fineRate = settingsRepo.finePerAbsentDayFlow.first()
                 val year = currentYear.value
 
                 // Building a large JSON document is real work, so do it off the main thread.
@@ -420,6 +436,9 @@ class ClassRollViewModel(application: Application) : AndroidViewModel(applicatio
                     val holidaysArray = JSONArray()
                     holidaySet.sorted().forEach { holidaysArray.put(it) }
                     jsonRoot.put("holidays", holidaysArray)
+
+                    // The fine rate used to be left out, so a restore silently reset it to 5.
+                    jsonRoot.put("finePerAbsentDay", fineRate)
 
                     // Compact output (the old pretty-printed form was much larger and slower).
                     jsonRoot.toString()
@@ -464,6 +483,7 @@ class ClassRollViewModel(application: Application) : AndroidViewModel(applicatio
                     }
 
                     val records = mutableListOf<AttendanceRecordEntity>()
+                    var skippedRecords = 0
                     for (i in 0 until recordsArray.length()) {
                         val rObj = recordsArray.optJSONObject(i) ?: continue
                         val y = rObj.optString("year", explicitYear).ifBlank {
@@ -477,8 +497,15 @@ class ClassRollViewModel(application: Application) : AndroidViewModel(applicatio
                             "ABSENT", "A" -> "A"
                             else -> rawStatus.ifBlank { "P" }
                         }
+                        // Dates must look like 2026-10-28. A malformed date would crash the
+                        // Summary screen later, so such records are skipped (and counted).
+                        val dateOk = d.length == 10 && d[4] == '-' && d[7] == '-'
                         if (d.isNotBlank() && r.isNotBlank()) {
-                            records.add(AttendanceRecordEntity(year = y, date = d, roll = r, status = st, isSynced = true))
+                            if (dateOk) {
+                                records.add(AttendanceRecordEntity(year = y, date = d, roll = r, status = st, isSynced = true))
+                            } else {
+                                skippedRecords++
+                            }
                         }
                     }
 
@@ -492,13 +519,22 @@ class ClassRollViewModel(application: Application) : AndroidViewModel(applicatio
                         null // older backup files have no holiday list; keep the current one
                     }
 
-                    ParsedBackup(students, records, explicitYear, holidays)
+                    val fine: Int? = if (jsonRoot.has("finePerAbsentDay")) {
+                        jsonRoot.optInt("finePerAbsentDay", -1).takeIf { it >= 0 }
+                    } else {
+                        null // older backup files have no fine rate; keep the current one
+                    }
+
+                    ParsedBackup(students, records, explicitYear, holidays, fine, skippedRecords)
                 }
 
                 // Throws, without touching local data, if the file has no usable data.
                 repository.restoreBackupData(parsed.students, parsed.records)
                 if (parsed.holidays != null) {
                     settingsRepo.setHolidays(parsed.holidays)
+                }
+                if (parsed.finePerAbsentDay != null) {
+                    settingsRepo.updateFinePerAbsentDay(parsed.finePerAbsentDay)
                 }
 
                 val targetYear = when {
@@ -511,7 +547,12 @@ class ClassRollViewModel(application: Application) : AndroidViewModel(applicatio
                 settingsRepo.updateAcademicYear(targetYear)
                 loadAvailableYears()
 
-                onResult(true, "Restored ${parsed.students.size} students and ${parsed.records.size} attendance records for academic year $targetYear successfully.")
+                val skippedNote = if (parsed.skippedRecords > 0) {
+                    " (${parsed.skippedRecords} records with an invalid date were skipped.)"
+                } else {
+                    ""
+                }
+                onResult(true, "Restored ${parsed.students.size} students and ${parsed.records.size} attendance records for academic year $targetYear successfully.$skippedNote")
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {

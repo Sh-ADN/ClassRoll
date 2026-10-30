@@ -188,12 +188,17 @@ fun SummaryDashboardScreen(viewModel: ClassRollViewModel) {
 
     // Filter attendance records up to cutoffDate and excluding weekends/holidays
     val validAttendanceTillCutoff = remember(allAttendance, cutoffDate, holidays) {
+        // A weekend check parses a date, which is slow. Do it once per distinct date (about
+        // 100-200) instead of once per record (10,000+ for a class this size).
+        val weekendByDate = HashMap<String, Boolean>()
         allAttendance.filter { record ->
-            record.date.isNotBlank() &&
-                record.date <= cutoffDate &&
+            val d = record.date
+            // The shape check also guarantees d.substring(0, 7) further down can never crash.
+            d.length == 10 && d[4] == '-' && d[7] == '-' &&
+                d <= cutoffDate &&
                 (record.status == "P" || record.status == "A") &&
-                !holidays.contains(record.date) &&
-                !isWeekendDate(record.date)
+                !holidays.contains(d) &&
+                !weekendByDate.getOrPut(d) { isWeekendDate(d) }
         }
     }
 
@@ -325,6 +330,13 @@ fun SummaryDashboardScreen(viewModel: ClassRollViewModel) {
         }
     }
 
+    // Exports always cover the WHOLE class in roll order, whatever search, sort or "alerts
+    // only" filter is active on screen. Before, a filter silently shrank the export and its
+    // TOTAL row, which matters when this sheet is used to collect money.
+    val exportStats = remember(studentStats) {
+        studentStats.sortedBy { it.roll.toIntOrNull() ?: Int.MAX_VALUE }
+    }
+
     val maxTotal = maxOf(totalSchoolDaysCounted, studentStats.maxOfOrNull { it.totalClasses } ?: 1, 1)
 
     // CSV Export Launcher (matches Class9B_Absent_Due_Fine spreadsheet format)
@@ -365,7 +377,7 @@ fun SummaryDashboardScreen(viewModel: ClassRollViewModel) {
                 sb.append(",Total Present,Total Absent,Due Fine (৳),Status\n")
 
                 // Student Rows (sorted by Roll)
-                val sortedForExport = filteredAndSortedStats
+                val sortedForExport = exportStats
                 sortedForExport.forEach { st ->
                     sb.append(escapeCsvCell(st.roll)).append(",")
                     sb.append(escapeCsvCell(st.name))
@@ -387,10 +399,10 @@ fun SummaryDashboardScreen(viewModel: ClassRollViewModel) {
                 val sumPresent = sortedForExport.sumOf { it.presentCount }
                 val sumAbsent = sortedForExport.sumOf { it.absentCount }
                 val sumFine = sortedForExport.sumOf { it.dueFine }
-                val formattedFine = NumberFormat.getIntegerInstance(Locale.US).format(sumFine)
                 sb.append(",").append(sumPresent)
                 sb.append(",").append(sumAbsent)
-                sb.append(",").append(escapeCsvCell(formattedFine))
+                // Plain number (no thousands separator) so it stays a number in Excel/Sheets.
+                sb.append(",").append(sumFine)
                 sb.append(",\n")
 
                 context.contentResolver.openOutputStream(uri)?.use { out ->
@@ -515,7 +527,7 @@ fun SummaryDashboardScreen(viewModel: ClassRollViewModel) {
                     )
                     curY += 20f
                     canvas.drawText(
-                        "Fine per absent day: ৳$finePerAbsentDay   |   Total School Days Counted: $totalSchoolDaysCounted   |   Students: ${filteredAndSortedStats.size}   |   Page $pageNumber",
+                        "Fine per absent day: ৳$finePerAbsentDay   |   Total School Days Counted: $totalSchoolDaysCounted   |   Students: ${exportStats.size}   |   Page $pageNumber",
                         margin,
                         curY + 10f,
                         subtitlePaint
@@ -563,7 +575,7 @@ fun SummaryDashboardScreen(viewModel: ClassRollViewModel) {
 
                 y = drawTableHeaders(y)
 
-                filteredAndSortedStats.forEachIndexed { index, st ->
+                exportStats.forEachIndexed { index, st ->
                     if (y + rowHeight * 2 > pageHeight - margin) {
                         pdfDocument.finishPage(page)
                         pageNumber++
@@ -647,14 +659,14 @@ fun SummaryDashboardScreen(viewModel: ClassRollViewModel) {
 
                 activeMonths.forEach { ym ->
                     canvas.drawLine(fx, y, fx, y + rowHeight, linePaint)
-                    val sumM = filteredAndSortedStats.sumOf { it.monthlyAbsent[ym] ?: 0 }
+                    val sumM = exportStats.sumOf { it.monthlyAbsent[ym] ?: 0 }
                     canvas.drawText(sumM.toString(), fx + 6f, y + 12.5f, redCellPaint)
                     fx += monthW
                 }
 
-                val sumP = filteredAndSortedStats.sumOf { it.presentCount }
-                val sumA = filteredAndSortedStats.sumOf { it.absentCount }
-                val sumFine = filteredAndSortedStats.sumOf { it.dueFine }
+                val sumP = exportStats.sumOf { it.presentCount }
+                val sumA = exportStats.sumOf { it.absentCount }
+                val sumFine = exportStats.sumOf { it.dueFine }
                 val formattedFine = NumberFormat.getIntegerInstance(Locale.US).format(sumFine)
 
                 canvas.drawLine(fx, y, fx, y + rowHeight, linePaint)
@@ -742,7 +754,8 @@ fun SummaryDashboardScreen(viewModel: ClassRollViewModel) {
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text(
-                        "Change the fine rate per absent day to automatically recalculate every student's due fine up to the selected cutoff date.",
+                        "Change the fine rate per absent day to automatically recalculate every student's due fine up to the selected cutoff date. " +
+                            "This re-prices every past absence too, so a report you printed earlier at the old rate will no longer match.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -775,10 +788,14 @@ fun SummaryDashboardScreen(viewModel: ClassRollViewModel) {
             confirmButton = {
                 Button(
                     onClick = {
-                        val parsed = fineInput.toIntOrNull() ?: 5
-                        viewModel.updateFinePerAbsentDay(parsed)
+                        // An empty box must never silently change the money rate.
+                        val parsed = fineInput.toIntOrNull()
+                        if (parsed != null) {
+                            viewModel.updateFinePerAbsentDay(parsed)
+                        }
                         showFineRateDialog = false
                     },
+                    enabled = fineInput.isNotBlank(),
                     modifier = Modifier.testTag("save_fine_rate_button")
                 ) {
                     Text("Recalculate")

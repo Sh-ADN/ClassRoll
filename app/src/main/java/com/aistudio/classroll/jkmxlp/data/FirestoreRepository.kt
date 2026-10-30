@@ -258,7 +258,12 @@ class FirestoreRepository(private val db: FirebaseFirestore) {
         }
     }
 
-    suspend fun saveUserSettings(academicYear: String, appTheme: String, holidays: Set<String>? = null) {
+    suspend fun saveUserSettings(
+        academicYear: String,
+        appTheme: String,
+        holidays: Set<String>? = null,
+        finePerAbsentDay: Int? = null
+    ) {
         try {
             val uid = requireUserId()
             val docRef = db.collection("users").document(uid).collection("settings").document("user_config")
@@ -271,12 +276,30 @@ class FirestoreRepository(private val db: FirebaseFirestore) {
             if (holidays != null) {
                 data["holidays"] = holidays.sorted()
             }
+            if (finePerAbsentDay != null) {
+                data["finePerAbsentDay"] = finePerAbsentDay
+            }
             // merge, so a call that does not include holidays never erases them
             docRef.set(data, SetOptions.merge()).await()
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
             // Ignore settings sync failure
+        }
+    }
+
+    // Returns the fine rate stored in the cloud, or null if the cloud copy has none
+    // (so a restore never replaces your rate with a default).
+    suspend fun pullFinePerAbsentDay(): Int? {
+        val uid = requireUserId()
+        return try {
+            val snap = db.collection("users").document(uid)
+                .collection("settings").document("user_config").get().await()
+            (snap.get("finePerAbsentDay") as? Number)?.toInt()?.takeIf { it >= 0 }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            null
         }
     }
 
@@ -301,6 +324,7 @@ class FirestoreRepository(private val db: FirebaseFirestore) {
         academicYear: String = "",
         appTheme: String = "SYSTEM",
         holidays: Set<String>? = null,
+        finePerAbsentDay: Int? = null,
         onProgress: (done: Int, total: Int) -> Unit = { _, _ -> }
     ) {
         val uid = requireUserId()
@@ -309,7 +333,7 @@ class FirestoreRepository(private val db: FirebaseFirestore) {
         }
 
         // Save user settings so academic year and holidays survive data clearing
-        saveUserSettings(defaultYear, appTheme, holidays)
+        saveUserSettings(defaultYear, appTheme, holidays, finePerAbsentDay)
 
         val studentsCol = db.collection("users").document(uid).collection("students")
         val attendanceCol = db.collection("users").document(uid).collection("attendance")
@@ -419,6 +443,8 @@ class FirestoreRepository(private val db: FirebaseFirestore) {
             val d = (doc.get("date") ?: if (docIdParts.size >= 3) docIdParts[1] else null)?.toString()?.trim()
             val r = (doc.get("roll") ?: if (docIdParts.size >= 3) docIdParts[2] else null)?.toString()?.trim()
             if (y.isNullOrBlank() || d.isNullOrBlank() || r.isNullOrBlank()) return@mapNotNull null
+            // A malformed date would crash the Summary screen later, so skip such records.
+            if (!(d.length == 10 && d[4] == '-' && d[7] == '-')) return@mapNotNull null
             val rawStatus = (doc.get("status") ?: "P").toString().trim()
             val s = when (rawStatus.uppercase()) {
                 "PRESENT", "P" -> "P"
